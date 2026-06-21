@@ -19,7 +19,13 @@
         .camera-overlay { position: fixed; inset: 0; background: black; z-index: 3000; display: none; flex-direction: column; }
         #video { width: 100%; height: 100%; object-fit: cover; }
         .preview-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 4000; display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(8px); }
-        #neighborhood-map { height: 350px; width: 100%; border-radius: 24px; margin-top: 15px; border: 2px solid #fff; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        #neighborhood-map { height: 420px; width: 100%; border-radius: 16px; margin-top: 12px; border: 1px solid #e5e7eb; box-shadow: 0 4px 16px rgba(0,0,0,0.06); z-index: 1; }
+        .heat-legend { font-size: 11px; line-height: 1.5; color: #4b5563; }
+        .heat-legend strong { color: #111827; }
+        .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); }
+        .heat-popup-title { font-weight: 900; font-size: 13px; margin-bottom: 4px; color: #111; }
+        .heat-popup-count { font-size: 12px; color: #B71C1C; font-weight: 700; margin-bottom: 6px; }
+        .heat-popup-link { font-size: 11px; color: #2563eb; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -86,8 +92,19 @@
     <!-- 4. MAHALLE RAPORU (HARİTA) -->
     <div id="neighborhood-view" class="view-section max-w-4xl mx-auto p-6 mt-4">
         <button onclick="showView('project-detail')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> GERİ</button>
-        <h2 class="text-2xl font-black uppercase tracking-tighter mb-1 text-[#2D2D2D]"><span id="map-neigh-name">...</span> Mahalle Raporu</h2>
+        <div class="flex flex-wrap items-start justify-between gap-4 mb-2">
+            <div>
+                <h2 class="text-xl font-black uppercase tracking-tighter text-[#2D2D2D]">Mahalle Sınırı ve Canlı Sorun Haritası</h2>
+                <p id="map-location-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-1">...</p>
+            </div>
+            <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50">Haritayı Ortala</button>
+        </div>
         <div id="neighborhood-map"></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+            <div class="heat-legend bg-white border border-gray-100 rounded-xl p-3"><strong>Harita kaynağı:</strong> OpenStreetMap tabanlı canlı sorun haritası; mahalle bildirimleri GPS noktalarından oluşturulur.</div>
+            <div class="heat-legend bg-white border border-gray-100 rounded-xl p-3"><strong>Sorun ağırlığı:</strong> 15 m tekrar engeli; daire yarıçapı logaritmik büyür (1 kişi = 15 m → 100 kişi = 70 m).</div>
+            <div class="heat-legend bg-white border border-gray-100 rounded-xl p-3"><strong>Yoğunluk:</strong> Aynı noktaya artan bildirimler daireyi büyütür; mahallede hangi sorunların daha yoğun raporlandığı görsel olarak okunur.</div>
+        </div>
         <div id="no-reports-msg" class="hidden bg-white p-10 rounded-2xl text-center mt-6 border-2 border-dashed border-gray-200 text-gray-400 font-bold italic">Henüz bu mahallede bir bildirim yapılmadı.</div>
         <div id="reports-list" class="mt-8 space-y-4"></div>
     </div>
@@ -129,8 +146,71 @@
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
 
-        let currentProject = "", camStream = null, leafletMap = null, currentMarkers = [], draft = { photo: null, lat: null, lng: null, neighborhood: null, district: null, city: null };
+        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
+        const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
+        const KADRO_RED = '#B71C1C';
+        const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
+        const formatFullLoc = ({ neighborhood, ilce, il }) => `${neighborhood}, ${ilce}, ${il}`;
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
+        const projectLabel = (t) => messages[t]?.title || t;
+
+        function distanceMeters(lat1, lng1, lat2, lng2) {
+            const R = 6371000, toRad = d => d * Math.PI / 180;
+            const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function calcHeatRadius(reporterCount) {
+            const n = Math.max(1, reporterCount);
+            if (n === 1) return MIN_R;
+            return Math.min(MIN_R + 55 * Math.log(n) / Math.log(HEAT_CAP), MAX_R);
+        }
+
+        function groupReportsIntoPoints(reports) {
+            const points = [];
+            for (const report of reports) {
+                let matched = points.find(pt => pt.type === report.type && distanceMeters(pt.lat, pt.lng, report.lat, report.lng) <= DUPLICATE_RADIUS_METERS);
+                if (matched) {
+                    matched.reporters.add(report.uid);
+                    matched.reports.push(report);
+                } else {
+                    points.push({ lat: report.lat, lng: report.lng, type: report.type, reporters: new Set([report.uid]), reports: [report] });
+                }
+            }
+            return points.map(pt => ({ ...pt, reporterCount: pt.reporters.size, mainReport: pt.reports[0] }));
+        }
+
+        async function reverseStreetName(lat, lng) {
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=tr`);
+                const addr = (await r.json()).address || {};
+                return addr.road || addr.pedestrian || addr.footway || addr.street || 'Konum';
+            } catch { return 'Konum'; }
+        }
+
+        function clearMapLayers() {
+            currentMapLayers.forEach(layer => leafletMap.removeLayer(layer));
+            currentMapLayers = [];
+        }
+
+        function renderHeatPoint(point) {
+            const radius = calcHeatRadius(point.reporterCount);
+            const circle = L.circle([point.lat, point.lng], {
+                color: KADRO_RED, weight: 2, fillColor: KADRO_RED, fillOpacity: 0.28, radius
+            }).addTo(leafletMap);
+            const pin = L.marker([point.lat, point.lng]).addTo(leafletMap);
+            const countLabel = point.reporterCount === 1 ? '1 kişi bildirdi' : `${point.reporterCount} kişi bildirdi`;
+            reverseStreetName(point.lat, point.lng).then(street => {
+                const mapsUrl = `https://www.google.com/maps?q=${point.lat},${point.lng}`;
+                pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>`);
+            });
+            currentMapLayers.push(circle, pin);
+        }
+
+        window.centerNeighborhoodMap = () => {
+            if (leafletMap && mapCenterCoords) leafletMap.setView(mapCenterCoords, 16);
+        };
 
         window.showView = (id) => { 
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active')); 
@@ -143,15 +223,13 @@
 
         async function detectFullLocation(lat, lng) {
             try {
-                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
-                const d = await r.json();
-                const addr = d.address;
-                return {
-                    neighborhood: addr.suburb || addr.neighbourhood || addr.village || addr.town || "Bilinmeyen Mahalle",
-                    district: addr.district || addr.town || addr.city_district || "Bilinmeyen İlçe",
-                    city: addr.province || addr.city || "Bilinmeyen İl"
-                };
-            } catch (e) { return { neighborhood: "Hata", district: "Hata", city: "Hata" }; }
+                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=tr`);
+                const addr = (await r.json()).address || {};
+                const il = addr.province || addr.state || addr.city || "Bilinmeyen İl";
+                const ilce = addr.town || addr.city_district || addr.county || addr.district || addr.municipality || "Bilinmeyen İlçe";
+                const neighborhood = addr.suburb || addr.neighbourhood || addr.quarter || addr.residential || addr.village || addr.hamlet || "Bilinmeyen Mahalle";
+                return { neighborhood, il, ilce };
+            } catch (e) { return { neighborhood: "Hata", il: "Hata", ilce: "Hata" }; }
         }
 
         onAuthStateChanged(auth, async (u) => {
@@ -161,9 +239,9 @@
                 if(snap.exists()){
                     const d = snap.data();
                     nick = d.nickname || nick;
-                    if(d.neighborhood) fullLocStr = `${d.neighborhood}, ${d.district}, ${d.city}`;
+                    if(d.neighborhood) fullLocStr = formatFullLoc(locFromDoc(d));
                 } else {
-                    await setDoc(doc(db, "users", u.uid), { nickname: nick, neighborhood: null, district: null, city: null, uid: u.uid, createdAt: serverTimestamp() });
+                    await setDoc(doc(db, "users", u.uid), { nickname: nick, neighborhood: null, il: null, ilce: null, uid: u.uid, createdAt: serverTimestamp() });
                 }
                 document.getElementById('display-nick').innerText = nick;
                 document.getElementById('nickname-input').value = nick;
@@ -181,7 +259,7 @@
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
                 draft.lat = pos.coords.latitude; draft.lng = pos.coords.longitude;
-                draft.neighborhood = loc.neighborhood; draft.district = loc.district; draft.city = loc.city;
+                draft.neighborhood = loc.neighborhood; draft.il = loc.il; draft.ilce = loc.ilce;
                 try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); document.getElementById('video').srcObject = camStream; document.getElementById('camera-interface').style.display = 'flex'; } catch(e) { alert("Kamera hatası!"); }
             }, () => alert("Konum İzni Gerekli!"));
         };
@@ -195,15 +273,15 @@
 
         window.finalizeReport = async () => {
             const uRef = doc(db, "users", auth.currentUser.uid), uSnap = await getDoc(uRef), ud = uSnap.data();
-            if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, district: draft.district, city: draft.city, lastNeighChange: serverTimestamp() });
+            if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, lastNeighChange: serverTimestamp() });
             else if(ud.neighborhood !== draft.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
             try {
-                await addDoc(collection(db, "reports"), { type: currentProject, photo: draft.photo, lat: draft.lat, lng: draft.lng, neighborhood: draft.neighborhood, district: draft.district, city: draft.city, note: document.getElementById('report-note').value.trim(), uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp() });
+                await addDoc(collection(db, "reports"), { type: currentProject, photo: draft.photo, lat: draft.lat, lng: draft.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, note: document.getElementById('report-note').value.trim(), uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp() });
                 document.getElementById('preview-scrim').style.display = 'none';
                 document.getElementById('report-note').value = '';
                 draft.photo = null;
                 if(!ud.neighborhood) {
-                    const fullLocStr = `${draft.neighborhood}, ${draft.district}, ${draft.city}`;
+                    const fullLocStr = formatFullLoc(draft);
                     document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
                     document.getElementById('panel-neighborhood').innerText = fullLocStr;
                 }
@@ -214,17 +292,29 @@
         window.viewNeighborhoodReport = async () => {
             const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
             if(!ud.neighborhood) return alert("Önce bir bildirim yapmalısınız.");
-            document.getElementById('map-neigh-name').innerText = ud.neighborhood; showView('neighborhood-view');
-            if(!leafletMap) { leafletMap = L.map('neighborhood-map').setView([38.43, 27.14], 15); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap); }
-            currentMarkers.forEach(m => leafletMap.removeLayer(m)); currentMarkers = [];
-            try { const qStr = `${ud.neighborhood} Mahallesi, ${ud.district}, ${ud.city}, Turkey`; const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`); const cData = await cRes.json(); if(cData.length > 0) leafletMap.setView([cData[0].lat, cData[0].lon], 16); } catch(e) {}
-            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", ud.city));
+            const { il, ilce } = locFromDoc(ud);
+            document.getElementById('map-location-label').innerText = `${il.toUpperCase()} / ${ilce.toUpperCase()} / ${ud.neighborhood.toUpperCase()} için mahalle sınırı ve canlı sorun haritası.`;
+            showView('neighborhood-view');
+            if(!leafletMap) { leafletMap = L.map('neighborhood-map').setView([39.0, 35.0], 6); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap); }
+            clearMapLayers();
+            try {
+                const qStr = `${ud.neighborhood} Mahallesi, ${ilce}, ${il}, Turkey`;
+                const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`);
+                const cData = await cRes.json();
+                if (cData.length > 0) { mapCenterCoords = [+cData[0].lat, +cData[0].lon]; leafletMap.setView(mapCenterCoords, 16); }
+            } catch(e) {}
+            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", il));
             const qs = await getDocs(q), list = document.getElementById('reports-list'); list.innerHTML = "";
-            if(qs.empty) document.getElementById('no-reports-msg').classList.remove('hidden');
-            else {
-                document.getElementById('no-reports-msg').classList.add('hidden');
-                qs.forEach(doc => { const d = doc.data(); const m = L.circle([d.lat, d.lng], { color: '#B71C1C', fillColor: '#B71C1C', fillOpacity: 0.5, radius: 15 }).addTo(leafletMap); currentMarkers.push(m); list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4"><img src="${d.photo}" class="w-20 h-20 object-cover rounded-xl"><div><p class="font-black text-xs uppercase text-[#B71C1C]">${d.type}</p><p class="text-xs text-gray-500 mt-1">${d.note || 'Not yok.'}</p><p class="text-[9px] text-gray-300 mt-2 uppercase font-bold text-[#B71C1C]">ÜYE: ${d.userNick}</p></div></div>`; });
-            }
+            if(qs.empty) { document.getElementById('no-reports-msg').classList.remove('hidden'); return; }
+            document.getElementById('no-reports-msg').classList.add('hidden');
+            const reports = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+            const points = groupReportsIntoPoints(reports);
+            points.forEach(renderHeatPoint);
+            points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
+                const r = pt.mainReport;
+                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo}" class="w-20 h-20 object-cover rounded-xl shrink-0"><div class="min-w-0"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p></div></div>`;
+            });
+            setTimeout(() => leafletMap.invalidateSize(), 400);
         };
 
         window.closeCamera = () => { if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; };
