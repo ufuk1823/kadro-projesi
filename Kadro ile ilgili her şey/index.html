@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KADRO.ORG — TÜRKİYE GENELİ V2.7</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@900&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root { --kadro-red: #B71C1C; --kadro-dark: #2D2D2D; --kadro-bg: #f4f4f4; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--kadro-bg); color: var(--kadro-dark); -webkit-tap-highlight-color: transparent; }
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .kadro-card { transition: 0.2s; cursor: pointer; overflow: hidden; position: relative; background: #fff; border-radius: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .kadro-card:active { transform: scale(0.98); }
+        .img-overlay { background: linear-gradient(to right, rgba(0,0,0,0.85), rgba(0,0,0,0.3)); position: absolute; inset: 0; z-index: 5; }
+        .camera-overlay { position: fixed; inset: 0; background: black; z-index: 3000; display: none; flex-direction: column; }
+        #video { width: 100%; height: 100%; object-fit: cover; }
+        .preview-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 4000; display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(8px); }
+        #neighborhood-map { height: 350px; width: 100%; border-radius: 24px; margin-top: 15px; border: 2px solid #fff; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+    <!-- Navbar -->
+    <nav class="bg-white border-b-2 border-gray-100 py-4 px-6 flex justify-between items-center sticky top-0 z-[2000]">
+        <div class="flex items-center gap-3 cursor-pointer" onclick="showView('main-hub')">
+            <div class="w-10 h-10 bg-[#B71C1C] rounded flex items-center justify-center text-white font-black text-xl shadow-lg">K</div>
+            <div class="flex flex-col text-[#2D2D2D]">
+                <span class="font-black text-2xl tracking-tighter uppercase leading-none font-['Archivo']">KADRO<span class="text-[#B71C1C]">.ORG</span></span>
+                <span class="text-[9px] text-gray-400 tracking-[0.3em] font-bold uppercase text-[#2D2D2D]">Koordinasyon Sistemi</span>
+            </div>
+        </div>
+        <div id="auth-section">
+            <button onclick="login()" id="login-btn" class="bg-[#B71C1C] text-white px-5 py-2 rounded font-bold text-sm uppercase">Giriş Yap</button>
+            <div id="user-info" class="hidden flex items-center gap-3 cursor-pointer" onclick="showView('user-panel')">
+                <div class="text-right hidden md:block leading-none">
+                    <p id="display-nick" class="font-black text-sm text-gray-800 tracking-tighter uppercase">Yükleniyor...</p>
+                    <span id="display-full-loc" class="text-[8px] font-bold text-red-600 uppercase tracking-widest">Konum Bekleniyor</span>
+                </div>
+                <div class="w-10 h-10 rounded-full border-2 border-[#B71C1C] bg-red-50 flex items-center justify-center text-[#B71C1C]">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 1. HUB (ANA SAYFA) -->
+    <div id="main-hub" class="view-section active max-w-4xl mx-auto p-6 mt-6">
+        <h1 class="text-2xl font-black text-center mb-10 tracking-tight uppercase text-[#2D2D2D]">ÇALIŞMA ALANI SEÇİNİZ</h1>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div onclick="showView('saha-view')" class="kadro-card p-10 flex flex-col items-center text-center border-b-8 border-[#B71C1C]">
+                <div class="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6 text-[#B71C1C]"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+                <h2 class="text-2xl font-black uppercase tracking-tighter text-[#2D2D2D]">SAHA GÖREVLERİ</h2>
+            </div>
+            <div onclick="showView('gundem-view')" class="kadro-card p-10 flex flex-col items-center text-center border-b-8 border-gray-800 text-[#2D2D2D]">
+                <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6 text-gray-800"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+                <h2 class="text-2xl font-black uppercase tracking-tighter">GÜNDEMLER</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. SAHA GÖREVLERİ LİSTESİ -->
+    <div id="saha-view" class="view-section max-w-4xl mx-auto p-6">
+        <button onclick="showView('main-hub')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> GERİ</button>
+        <div class="space-y-4">
+            <div onclick="openProject('bozuk-yollar')" class="kadro-card h-40 relative flex items-center px-10 shadow-lg text-white"><img src="https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=800&q=80" class="absolute inset-0 w-full h-full object-cover opacity-60"><div class="img-overlay"></div><span class="relative text-3xl font-black uppercase tracking-tighter z-10">Bozuk Yollar</span><div class="absolute right-8 z-10 bg-white text-black px-5 py-2 rounded-full font-black text-xs shadow-md uppercase">Seç →</div></div>
+            <div onclick="openProject('temizlik')" class="kadro-card h-40 relative flex items-center px-10 shadow-lg text-white"><img src="https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?auto=format&fit=crop&w=800&q=80" class="absolute inset-0 w-full h-full object-cover opacity-60"><div class="img-overlay"></div><span class="relative text-3xl font-black uppercase tracking-tighter z-10">Çevresel Temizlik</span><div class="absolute right-8 z-10 bg-white text-black px-5 py-2 rounded-full font-black text-xs shadow-md uppercase">Seç →</div></div>
+            <div onclick="openProject('aksakliklar')" class="kadro-card h-40 relative flex items-center px-10 shadow-lg border-b-8 border-[#B71C1C] text-white"><img src="https://images.unsplash.com/photo-1581092160562-40aa08e78837?auto=format&fit=crop&w=800&q=80" class="absolute inset-0 w-full h-full object-cover opacity-60"><div class="img-overlay"></div><div class="relative z-10"><span class="text-3xl font-black uppercase tracking-tighter block leading-none">Genel Aksaklıklar</span><span class="text-[9px] font-black text-red-400 tracking-[0.2em] mt-1 block uppercase font-bold">BANK • LAMBA • KALDIRIM</span></div><div class="absolute right-8 z-10 bg-white text-black px-5 py-2 rounded-full font-black text-xs shadow-md uppercase">Seç →</div></div>
+        </div>
+    </div>
+
+    <!-- 3. PROJE DETAY -->
+    <div id="project-detail" class="view-section max-w-xl mx-auto p-6 mt-4 text-center">
+        <button onclick="showView('saha-view')" class="mb-10 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest mx-auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> LİSTEYE DÖN</button>
+        <div class="bg-white rounded-3xl p-8 shadow-2xl border-t-8 border-[#B71C1C]">
+            <h2 id="project-title" class="text-4xl font-black uppercase tracking-tighter mb-4 text-[#B71C1C]">...</h2>
+            <p id="project-desc" class="text-base font-bold leading-relaxed text-gray-500 mb-10 italic">...</p>
+            <button onclick="handleCaptureStart()" class="bg-[#B71C1C] text-white w-full py-6 rounded-2xl font-black text-lg flex items-center justify-center gap-4 shadow-xl mb-4 text-white uppercase"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>FOTOĞRAF ÇEK VE KAYDET</button>
+            <button onclick="viewNeighborhoodReport()" class="bg-gray-800 text-white w-full py-4 rounded-xl font-bold text-xs uppercase tracking-widest text-white shadow-md">📍 Mahalle Ortak Raporunu Görüntüle</button>
+        </div>
+    </div>
+
+    <!-- 4. MAHALLE RAPORU (HARİTA) -->
+    <div id="neighborhood-view" class="view-section max-w-4xl mx-auto p-6 mt-4">
+        <button onclick="showView('project-detail')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> GERİ</button>
+        <h2 class="text-2xl font-black uppercase tracking-tighter mb-1 text-[#2D2D2D]"><span id="map-neigh-name">...</span> Mahalle Raporu</h2>
+        <div id="neighborhood-map"></div>
+        <div id="no-reports-msg" class="hidden bg-white p-10 rounded-2xl text-center mt-6 border-2 border-dashed border-gray-200 text-gray-400 font-bold italic">Henüz bu mahallede bir bildirim yapılmadı.</div>
+        <div id="reports-list" class="mt-8 space-y-4"></div>
+    </div>
+
+    <!-- 5. ÜYE PANELİ -->
+    <div id="user-panel" class="view-section max-w-md mx-auto p-6">
+        <button onclick="showView('main-hub')" class="mb-10 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest mx-auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> ANA MENÜ</button>
+        <div class="bg-white rounded-3xl p-8 shadow-2xl text-center border-t-8 border-[#B71C1C]">
+            <div class="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center text-[#B71C1C] mx-auto mb-6 border-2 border-[#B71C1C] shadow-inner"><svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+            <input type="text" id="nickname-input" class="text-2xl font-black text-center border-b-2 border-gray-100 focus:border-[#B71C1C] outline-none py-2 w-full text-[#2D2D2D] mb-6" placeholder="İsim">
+            <button onclick="saveNickname()" class="text-[10px] font-black bg-gray-800 text-white py-3 px-8 rounded-full uppercase tracking-widest shadow-md">GÜNCELLE</button>
+            <div class="bg-gray-50 rounded-2xl p-5 mt-10 text-left">
+                <h4 class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 text-gray-400">Kayıtlı Mahallem</h4>
+                <p id="panel-neighborhood" class="font-black text-lg text-[#2D2D2D] uppercase tracking-tighter">Henüz Atanmadı</p>
+                <button onclick="changeNeighborhood()" class="text-[10px] font-bold text-[#B71C1C] underline uppercase mt-2">Adres Değiştir</button>
+            </div>
+            <button onclick="logout()" class="mt-12 text-[10px] font-black text-red-600 underline uppercase opacity-50">Sistemden Güvenli Çıkış</button>
+        </div>
+    </div>
+
+    <!-- 6. GÜNDEMLER -->
+    <div id="gundem-view" class="view-section max-w-7xl mx-auto p-6 mt-6 text-[#2D2D2D]">
+        <button onclick="showView('main-hub')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> ANA MENÜYE DÖN</button>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 text-[#2D2D2D]">
+            <div><h3 class="text-xl font-black mb-6 bg-white p-5 rounded-xl border-l-8 border-l-gray-400 uppercase tracking-tighter shadow-sm text-black">⏳ Gündem Adayları</h3><div class="bg-gray-100 border-2 border-dashed border-gray-300 p-12 rounded-2xl text-center text-gray-400 font-bold italic text-black">Henüz bir gündem adaylığı başlatılmadı.</div></div>
+            <div><h3 class="text-xl font-black mb-6 bg-white p-5 rounded-xl border-l-8 border-l-[#B71C1C] text-[#B71C1C] uppercase tracking-tighter shadow-sm text-black">🔥 Ana Gündem</h3><div class="bg-red-50 border-2 border-dashed border-red-100 p-12 rounded-2xl text-center text-red-200 font-bold italic text-sm px-6 text-black uppercase">Mahalle genelinde aktif bir gündem maddesi bulunmuyor.</div></div>
+        </div>
+    </div>
+
+    <!-- KAMERA VE ÖNİZLEME OVERLAYLARI -->
+    <div id="camera-interface" class="camera-overlay"><video id="video" autoplay playsinline muted></video><div class="absolute bottom-10 flex gap-4 w-full px-10 z-[4000] text-white"><button onclick="closeCamera()" class="flex-1 bg-white/20 backdrop-blur py-5 rounded-2xl font-black uppercase">İPTAL</button><button onclick="takeSnapshot()" class="flex-1 bg-[#B71C1C] py-5 rounded-2xl font-black text-xl uppercase shadow-2xl">ÇEK</button></div></div>
+    <div id="preview-scrim" class="preview-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"><h3 class="font-black uppercase mb-4 text-[#B71C1C]">Bildirim Gönderin</h3><img id="photo-preview" class="w-full h-48 object-cover rounded-2xl mb-4 border border-gray-100 shadow-sm"><div class="mb-4"><label class="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Notunuzu İletebilirsiniz <span class="text-gray-300">(İsteğe Bağlı)</span></label><textarea id="report-note" class="w-full bg-gray-50 border border-gray-100 rounded-xl p-3 text-sm focus:border-[#B71C1C] outline-none text-[#2D2D2D]" rows="3"></textarea></div><div class="flex gap-3 mt-6"><button onclick="closePreview()" class="flex-1 bg-gray-100 text-gray-500 py-4 rounded-xl font-bold uppercase text-xs">Yeniden Çek</button><button onclick="finalizeReport()" id="confirm-send-btn" class="flex-1 bg-[#B71C1C] text-white py-4 rounded-xl font-black uppercase text-xs shadow-lg">GÖNDER</button></div></div></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+
+        const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
+        const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
+
+        let currentProject = "", camStream = null, leafletMap = null, currentMarkers = [], draft = { photo: null, lat: null, lng: null, neighborhood: null, district: null, city: null };
+        const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
+
+        window.showView = (id) => { 
+            document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active')); 
+            document.getElementById(id).classList.add('active'); 
+            window.scrollTo(0,0);
+            if(id === 'neighborhood-view' && leafletMap) { setTimeout(() => { leafletMap.invalidateSize(); }, 400); }
+        };
+
+        window.openProject = (t) => { currentProject = t; document.getElementById('project-title').innerText = messages[t].title; document.getElementById('project-desc').innerText = messages[t].desc; document.getElementById('report-note').placeholder = messages[t].p; showView('project-detail'); };
+
+        async function detectFullLocation(lat, lng) {
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+                const d = await r.json();
+                const addr = d.address;
+                return {
+                    neighborhood: addr.suburb || addr.neighbourhood || addr.village || addr.town || "Bilinmeyen Mahalle",
+                    district: addr.district || addr.town || addr.city_district || "Bilinmeyen İlçe",
+                    city: addr.province || addr.city || "Bilinmeyen İl"
+                };
+            } catch (e) { return { neighborhood: "Hata", district: "Hata", city: "Hata" }; }
+        }
+
+        onAuthStateChanged(auth, async (u) => {
+            if(u){
+                const snap = await getDoc(doc(db, "users", u.uid));
+                let nick = u.displayName || "Üye", fullLocStr = "Konum Atanmadı";
+                if(snap.exists()){
+                    const d = snap.data();
+                    nick = d.nickname || nick;
+                    if(d.neighborhood) fullLocStr = `${d.neighborhood}, ${d.district}, ${d.city}`;
+                } else {
+                    await setDoc(doc(db, "users", u.uid), { nickname: nick, neighborhood: null, district: null, city: null, uid: u.uid, createdAt: serverTimestamp() });
+                }
+                document.getElementById('display-nick').innerText = nick;
+                document.getElementById('nickname-input').value = nick;
+                document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
+                document.getElementById('panel-neighborhood').innerText = fullLocStr;
+                document.getElementById('login-btn').classList.add('hidden'); document.getElementById('user-info').classList.remove('hidden');
+            } else { document.getElementById('login-btn').classList.remove('hidden'); document.getElementById('user-info').classList.add('hidden'); }
+        });
+
+        window.login = () => signInWithPopup(auth, provider);
+        window.logout = () => signOut(auth).then(()=>location.reload());
+        window.saveNickname = async () => { const n = document.getElementById('nickname-input').value.trim(); await updateDoc(doc(db, "users", auth.currentUser.uid), { nickname: n }); document.getElementById('display-nick').innerText = n; alert("İsim Güncellendi!"); };
+
+        window.handleCaptureStart = () => {
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
+                draft.lat = pos.coords.latitude; draft.lng = pos.coords.longitude;
+                draft.neighborhood = loc.neighborhood; draft.district = loc.district; draft.city = loc.city;
+                try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); document.getElementById('video').srcObject = camStream; document.getElementById('camera-interface').style.display = 'flex'; } catch(e) { alert("Kamera hatası!"); }
+            }, () => alert("Konum İzni Gerekli!"));
+        };
+
+        window.takeSnapshot = () => {
+            const v = document.getElementById('video'), c = document.createElement('canvas');
+            const s = Math.min(1, 1024 / v.videoWidth); c.width = v.videoWidth * s; c.height = v.videoHeight * s;
+            c.getContext('2d').drawImage(v,0,0,c.width,c.height); draft.photo = c.toDataURL('image/jpeg', 0.8);
+            document.getElementById('photo-preview').src = draft.photo; if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; document.getElementById('preview-scrim').style.display='flex';
+        };
+
+        window.finalizeReport = async () => {
+            const uRef = doc(db, "users", auth.currentUser.uid), uSnap = await getDoc(uRef), ud = uSnap.data();
+            if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, district: draft.district, city: draft.city, lastNeighChange: serverTimestamp() });
+            else if(ud.neighborhood !== draft.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
+            try {
+                await addDoc(collection(db, "reports"), { type: currentProject, photo: draft.photo, lat: draft.lat, lng: draft.lng, neighborhood: draft.neighborhood, district: draft.district, city: draft.city, note: document.getElementById('report-note').value.trim(), uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp() });
+                document.getElementById('preview-scrim').style.display = 'none';
+                document.getElementById('report-note').value = '';
+                draft.photo = null;
+                if(!ud.neighborhood) {
+                    const fullLocStr = `${draft.neighborhood}, ${draft.district}, ${draft.city}`;
+                    document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
+                    document.getElementById('panel-neighborhood').innerText = fullLocStr;
+                }
+                await viewNeighborhoodReport();
+            } catch(e) { alert(e.message); }
+        };
+
+        window.viewNeighborhoodReport = async () => {
+            const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
+            if(!ud.neighborhood) return alert("Önce bir bildirim yapmalısınız.");
+            document.getElementById('map-neigh-name').innerText = ud.neighborhood; showView('neighborhood-view');
+            if(!leafletMap) { leafletMap = L.map('neighborhood-map').setView([38.43, 27.14], 15); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap); }
+            currentMarkers.forEach(m => leafletMap.removeLayer(m)); currentMarkers = [];
+            try { const qStr = `${ud.neighborhood} Mahallesi, ${ud.district}, ${ud.city}, Turkey`; const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`); const cData = await cRes.json(); if(cData.length > 0) leafletMap.setView([cData[0].lat, cData[0].lon], 16); } catch(e) {}
+            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", ud.city));
+            const qs = await getDocs(q), list = document.getElementById('reports-list'); list.innerHTML = "";
+            if(qs.empty) document.getElementById('no-reports-msg').classList.remove('hidden');
+            else {
+                document.getElementById('no-reports-msg').classList.add('hidden');
+                qs.forEach(doc => { const d = doc.data(); const m = L.circle([d.lat, d.lng], { color: '#B71C1C', fillColor: '#B71C1C', fillOpacity: 0.5, radius: 15 }).addTo(leafletMap); currentMarkers.push(m); list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4"><img src="${d.photo}" class="w-20 h-20 object-cover rounded-xl"><div><p class="font-black text-xs uppercase text-[#B71C1C]">${d.type}</p><p class="text-xs text-gray-500 mt-1">${d.note || 'Not yok.'}</p><p class="text-[9px] text-gray-300 mt-2 uppercase font-bold text-[#B71C1C]">ÜYE: ${d.userNick}</p></div></div>`; });
+            }
+        };
+
+        window.closeCamera = () => { if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; };
+        window.closePreview = () => { document.getElementById('preview-scrim').style.display='none'; handleCaptureStart(); };
+    </script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
