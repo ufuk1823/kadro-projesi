@@ -26,6 +26,9 @@
         .heat-popup-title { font-weight: 900; font-size: 13px; margin-bottom: 4px; color: #111; }
         .heat-popup-count { font-size: 12px; color: #B71C1C; font-weight: 700; margin-bottom: 6px; }
         .heat-popup-link { font-size: 11px; color: #2563eb; text-decoration: underline; }
+        .btn-support { background: #16a34a; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 800; text-transform: uppercase; cursor: pointer; width: 100%; margin-top: 8px; }
+        .btn-support:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-support-card { background: #16a34a; color: #fff; border: none; border-radius: 10px; padding: 10px 14px; font-size: 10px; font-weight: 800; text-transform: uppercase; cursor: pointer; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -146,7 +149,7 @@
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
 
-        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
+        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
         const KADRO_RED = '#B71C1C';
         const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
@@ -167,18 +170,135 @@
             return Math.min(MIN_R + 55 * Math.log(n) / Math.log(HEAT_CAP), MAX_R);
         }
 
+        function userAlreadyAtPoint(reports, anchorId, uid) {
+            return reports.some(r => r.uid === uid && (r.id === anchorId || r.anchorId === anchorId));
+        }
+
+        function countPhotosAtPoint(reports, anchorId) {
+            return reports.filter(r => r.photo && (r.id === anchorId || r.anchorId === anchorId)).length;
+        }
+
         function groupReportsIntoPoints(reports) {
-            const points = [];
+            const byAnchor = new Map();
+            const standalone = [];
             for (const report of reports) {
+                if (report.anchorId) {
+                    if (!byAnchor.has(report.anchorId)) byAnchor.set(report.anchorId, []);
+                    byAnchor.get(report.anchorId).push(report);
+                } else {
+                    standalone.push(report);
+                }
+            }
+            const points = [];
+            for (const [anchorId, group] of byAnchor) {
+                const anchor = group.find(r => r.id === anchorId) || group[0];
+                const reporters = new Set(group.map(r => r.uid));
+                points.push({ lat: anchor.lat, lng: anchor.lng, type: anchor.type, anchorId, reporters, reports: group, reporterCount: reporters.size, mainReport: group.find(r => r.photo) || anchor });
+            }
+            for (const report of standalone) {
                 let matched = points.find(pt => pt.type === report.type && distanceMeters(pt.lat, pt.lng, report.lat, report.lng) <= DUPLICATE_RADIUS_METERS);
                 if (matched) {
                     matched.reporters.add(report.uid);
                     matched.reports.push(report);
+                    matched.reporterCount = matched.reporters.size;
+                    if (report.photo && !matched.mainReport.photo) matched.mainReport = report;
                 } else {
-                    points.push({ lat: report.lat, lng: report.lng, type: report.type, reporters: new Set([report.uid]), reports: [report] });
+                    points.push({ lat: report.lat, lng: report.lng, type: report.type, anchorId: report.id, reporters: new Set([report.uid]), reports: [report], reporterCount: 1, mainReport: report });
                 }
             }
-            return points.map(pt => ({ ...pt, reporterCount: pt.reporters.size, mainReport: pt.reports[0] }));
+            return points;
+        }
+
+        async function findNearbyAnchor(neighborhood, il, type, lat, lng) {
+            const q = query(collection(db, "reports"), where("neighborhood", "==", neighborhood), where("city", "==", il));
+            const qs = await getDocs(q);
+            let best = null, bestDist = DUPLICATE_RADIUS_METERS + 1;
+            for (const d of qs.docs) {
+                const r = d.data();
+                if (r.type !== type) continue;
+                const anchorId = r.anchorId || d.id;
+                let anchorLat = r.lat, anchorLng = r.lng;
+                if (r.anchorId) {
+                    const aDoc = qs.docs.find(x => x.id === r.anchorId);
+                    if (aDoc) { anchorLat = aDoc.data().lat; anchorLng = aDoc.data().lng; }
+                }
+                const dist = distanceMeters(anchorLat, anchorLng, lat, lng);
+                if (dist <= DUPLICATE_RADIUS_METERS && dist < bestDist) {
+                    bestDist = dist;
+                    const aDoc = qs.docs.find(x => x.id === anchorId);
+                    best = { id: anchorId, ...(aDoc ? aDoc.data() : r) };
+                }
+            }
+            return best;
+        }
+
+        function supportButtonHtml(anchorId, compact) {
+            const cls = compact ? 'btn-support' : 'btn-support-card';
+            return `<button type="button" class="${cls}" onclick="supportReport('${anchorId}')">Ben de Bildiriyorum</button>`;
+        }
+
+        function renderReportsList(points) {
+            const list = document.getElementById('reports-list');
+            list.innerHTML = '';
+            points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
+                const r = pt.mainReport;
+                const already = auth.currentUser && pt.reporters.has(auth.currentUser.uid);
+                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="text-[10px] font-bold text-green-700 mt-2 uppercase">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}</div></div>`;
+            });
+        }
+
+        function renderHeatPoint(point) {
+            const radius = calcHeatRadius(point.reporterCount);
+            const circle = L.circle([point.lat, point.lng], {
+                color: KADRO_RED, weight: 2, fillColor: KADRO_RED, fillOpacity: 0.28, radius
+            }).addTo(leafletMap);
+            const pin = L.marker([point.lat, point.lng]).addTo(leafletMap);
+            circle._anchorId = point.anchorId;
+            pin._anchorId = point.anchorId;
+            const countLabel = point.reporterCount === 1 ? '1 kişi bildirdi' : `${point.reporterCount} kişi bildirdi`;
+            const already = auth.currentUser && point.reporters.has(auth.currentUser.uid);
+            reverseStreetName(point.lat, point.lng).then(street => {
+                const mapsUrl = `https://www.google.com/maps?q=${point.lat},${point.lng}`;
+                const supportBlock = already ? '<p class="text-[10px] font-bold text-green-700 mt-2">✓ Bildirdiniz</p>' : supportButtonHtml(point.anchorId, true);
+                pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count" id="popup-count-${point.anchorId}">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>${supportBlock}`);
+            });
+            currentMapLayers.push({ circle, pin, point });
+        }
+
+        function refreshHeatLayers(points) {
+            clearMapLayers();
+            points.forEach(renderHeatPoint);
+            renderReportsList(points);
+        }
+
+        async function loadNeighborhoodReports(ud) {
+            const { il, ilce } = locFromDoc(ud);
+            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", il));
+            const qs = await getDocs(q);
+            return { reports: qs.docs.map(d => ({ id: d.id, ...d.data() })), il, ilce };
+        }
+
+        async function paintNeighborhoodMap(ud) {
+            const { reports, il, ilce } = await loadNeighborhoodReports(ud);
+            cachedMapReports = reports;
+            cachedMapUser = ud;
+            document.getElementById('map-location-label').innerText = `${il.toUpperCase()} / ${ilce.toUpperCase()} / ${ud.neighborhood.toUpperCase()} için mahalle sınırı ve canlı sorun haritası.`;
+            if (!leafletMap) { leafletMap = L.map('neighborhood-map').setView([39.0, 35.0], 6); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap); }
+            clearMapLayers();
+            try {
+                const qStr = `${ud.neighborhood} Mahallesi, ${ilce}, ${il}, Turkey`;
+                const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`);
+                const cData = await cRes.json();
+                if (cData.length > 0) { mapCenterCoords = [+cData[0].lat, +cData[0].lon]; leafletMap.setView(mapCenterCoords, 16); }
+            } catch (e) {}
+            if (reports.length === 0) {
+                document.getElementById('no-reports-msg').classList.remove('hidden');
+                document.getElementById('reports-list').innerHTML = '';
+                return;
+            }
+            document.getElementById('no-reports-msg').classList.add('hidden');
+            refreshHeatLayers(groupReportsIntoPoints(reports));
+            setTimeout(() => leafletMap.invalidateSize(), 400);
         }
 
         async function reverseStreetName(lat, lng) {
@@ -190,22 +310,11 @@
         }
 
         function clearMapLayers() {
-            currentMapLayers.forEach(layer => leafletMap.removeLayer(layer));
-            currentMapLayers = [];
-        }
-
-        function renderHeatPoint(point) {
-            const radius = calcHeatRadius(point.reporterCount);
-            const circle = L.circle([point.lat, point.lng], {
-                color: KADRO_RED, weight: 2, fillColor: KADRO_RED, fillOpacity: 0.28, radius
-            }).addTo(leafletMap);
-            const pin = L.marker([point.lat, point.lng]).addTo(leafletMap);
-            const countLabel = point.reporterCount === 1 ? '1 kişi bildirdi' : `${point.reporterCount} kişi bildirdi`;
-            reverseStreetName(point.lat, point.lng).then(street => {
-                const mapsUrl = `https://www.google.com/maps?q=${point.lat},${point.lng}`;
-                pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>`);
+            currentMapLayers.forEach(layer => {
+                if (layer.circle) leafletMap.removeLayer(layer.circle);
+                if (layer.pin) leafletMap.removeLayer(layer.pin);
             });
-            currentMapLayers.push(circle, pin);
+            currentMapLayers = [];
         }
 
         window.centerNeighborhoodMap = () => {
@@ -256,6 +365,7 @@
         window.saveNickname = async () => { const n = document.getElementById('nickname-input').value.trim(); await updateDoc(doc(db, "users", auth.currentUser.uid), { nickname: n }); document.getElementById('display-nick').innerText = n; alert("İsim Güncellendi!"); };
 
         window.handleCaptureStart = () => {
+            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
                 draft.lat = pos.coords.latitude; draft.lng = pos.coords.longitude;
@@ -272,11 +382,30 @@
         };
 
         window.finalizeReport = async () => {
+            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
             const uRef = doc(db, "users", auth.currentUser.uid), uSnap = await getDoc(uRef), ud = uSnap.data();
             if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, lastNeighChange: serverTimestamp() });
             else if(ud.neighborhood !== draft.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
             try {
-                await addDoc(collection(db, "reports"), { type: currentProject, photo: draft.photo, lat: draft.lat, lng: draft.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, note: document.getElementById('report-note').value.trim(), uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp() });
+                const { reports } = await loadNeighborhoodReports({ neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il });
+                const anchor = await findNearbyAnchor(draft.neighborhood, draft.il, currentProject, draft.lat, draft.lng);
+                const note = document.getElementById('report-note').value.trim();
+                if (anchor) {
+                    if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return alert('Bu noktayı zaten bildirdiniz.');
+                    const photoCount = countPhotosAtPoint(reports, anchor.id);
+                    const photo = photoCount < 3 ? draft.photo : null;
+                    await addDoc(collection(db, "reports"), {
+                        type: currentProject, photo, kind: photo ? 'photo' : 'support', anchorId: anchor.id,
+                        lat: anchor.lat, lng: anchor.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce,
+                        city: draft.il, district: draft.ilce, note, uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
+                    });
+                } else {
+                    await addDoc(collection(db, "reports"), {
+                        type: currentProject, photo: draft.photo, kind: 'photo', anchorId: null,
+                        lat: draft.lat, lng: draft.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce,
+                        city: draft.il, district: draft.ilce, note, uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
+                    });
+                }
                 document.getElementById('preview-scrim').style.display = 'none';
                 document.getElementById('report-note').value = '';
                 draft.photo = null;
@@ -289,32 +418,34 @@
             } catch(e) { alert(e.message); }
         };
 
+        window.supportReport = async (anchorId) => {
+            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            try {
+                const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
+                if (!ud?.neighborhood) return alert('Önce bir bildirim yaparak mahallenizi atayın.');
+                const anchorSnap = await getDoc(doc(db, "reports", anchorId));
+                if (!anchorSnap.exists()) return alert('Sorun noktası bulunamadı.');
+                const anchor = anchorSnap.data();
+                if (ud.neighborhood !== anchor.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
+                const { reports } = await loadNeighborhoodReports(ud);
+                if (userAlreadyAtPoint(reports, anchorId, auth.currentUser.uid)) return alert('Bu noktayı zaten bildirdiniz.');
+                await addDoc(collection(db, "reports"), {
+                    type: anchor.type, photo: null, kind: 'support', anchorId,
+                    lat: anchor.lat, lng: anchor.lng, neighborhood: anchor.neighborhood,
+                    il: anchor.il || anchor.city, ilce: anchor.ilce || anchor.district,
+                    city: anchor.city || anchor.il, district: anchor.district || anchor.ilce,
+                    note: '', uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
+                });
+                if (cachedMapUser) await paintNeighborhoodMap(cachedMapUser);
+            } catch (e) { alert(e.message); }
+        };
+
         window.viewNeighborhoodReport = async () => {
+            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
             const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
             if(!ud.neighborhood) return alert("Önce bir bildirim yapmalısınız.");
-            const { il, ilce } = locFromDoc(ud);
-            document.getElementById('map-location-label').innerText = `${il.toUpperCase()} / ${ilce.toUpperCase()} / ${ud.neighborhood.toUpperCase()} için mahalle sınırı ve canlı sorun haritası.`;
             showView('neighborhood-view');
-            if(!leafletMap) { leafletMap = L.map('neighborhood-map').setView([39.0, 35.0], 6); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap); }
-            clearMapLayers();
-            try {
-                const qStr = `${ud.neighborhood} Mahallesi, ${ilce}, ${il}, Turkey`;
-                const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`);
-                const cData = await cRes.json();
-                if (cData.length > 0) { mapCenterCoords = [+cData[0].lat, +cData[0].lon]; leafletMap.setView(mapCenterCoords, 16); }
-            } catch(e) {}
-            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", il));
-            const qs = await getDocs(q), list = document.getElementById('reports-list'); list.innerHTML = "";
-            if(qs.empty) { document.getElementById('no-reports-msg').classList.remove('hidden'); return; }
-            document.getElementById('no-reports-msg').classList.add('hidden');
-            const reports = qs.docs.map(d => ({ id: d.id, ...d.data() }));
-            const points = groupReportsIntoPoints(reports);
-            points.forEach(renderHeatPoint);
-            points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
-                const r = pt.mainReport;
-                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo}" class="w-20 h-20 object-cover rounded-xl shrink-0"><div class="min-w-0"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p></div></div>`;
-            });
-            setTimeout(() => leafletMap.invalidateSize(), 400);
+            await paintNeighborhoodMap(ud);
         };
 
         window.closeCamera = () => { if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; };
