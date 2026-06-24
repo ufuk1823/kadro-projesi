@@ -169,7 +169,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
 
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
@@ -178,7 +178,8 @@
         const streetNameCache = new Map(), streetNamePending = new Map();
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
         const PHOTO_MAX_WIDTH = 1024, MAX_PHOTOS_PER_POINT = 3, PHOTO_JPEG_QUALITY = 0.8;
-        const NEIGHBORHOOD_CHANGE_COOLDOWN_DAYS = 30;
+        const USER_DAILY_PHOTO_LIMIT = 3, NEIGHBORHOOD_CHANGE_COOLDOWN_DAYS = 30;
+        const ISTANBUL_TZ = 'Europe/Istanbul';
         const KADRO_RED = '#B71C1C';
         const MSG = {
             AUTH_REQUIRED: 'Katkı sunmak için lütfen giriş yapın',
@@ -192,6 +193,7 @@
             ANCHOR_NOT_FOUND: 'Sorun noktası bulunamadı.',
             NEED_FIRST_REPORT: 'Önce bir bildirim yapmalısınız.',
             NEED_NEIGHBORHOOD_FOR_SUPPORT: 'Önce bir bildirim yaparak mahallenizi atayın.',
+            DAILY_PHOTO_LIMIT: 'Günlük konumlu fotoğraf limitinize (3) ulaştınız. Yarın tekrar deneyebilir veya "Ben de Bildiriyorum" ile destek verebilirsiniz.',
             neighborhoodMismatch: (name) => `Sadece kayıtlı olduğunuz ${name} mahallesinde bildirim yapabilirsiniz.`,
             neighborhoodChangeWait: (date) => `Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${date} tarihini bekleyiniz.`,
             neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
@@ -222,6 +224,24 @@
 
         function countPhotosAtPoint(reports, anchorId) {
             return reports.filter(r => r.photo && (r.id === anchorId || r.anchorId === anchorId)).length;
+        }
+
+        function getIstanbulDayRange() {
+            const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: ISTANBUL_TZ }).format(new Date());
+            const start = new Date(`${todayStr}T00:00:00+03:00`);
+            return { start, end: new Date(start.getTime() + 86400000) };
+        }
+
+        async function countUserPhotosToday(uid) {
+            const { start, end } = getIstanbulDayRange();
+            const q = query(
+                collection(db, "reports"),
+                where("uid", "==", uid),
+                where("createdAt", ">=", Timestamp.fromDate(start)),
+                where("createdAt", "<", Timestamp.fromDate(end))
+            );
+            const qs = await getDocs(q);
+            return qs.docs.filter(d => d.data().photo).length;
         }
 
         function buildProblemPoints(reports) {
@@ -496,12 +516,21 @@
                 const { reports } = await loadNeighborhoodReports({ neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il });
                 const anchor = findNearbyAnchor(reports, currentProject, draft.lat, draft.lng);
                 const note = document.getElementById('report-note').value.trim();
+                let photoToSave;
                 if (anchor) {
                     if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return showUserMessage(MSG.ALREADY_REPORTED);
                     const photoCount = countPhotosAtPoint(reports, anchor.id);
-                    const photo = photoCount < MAX_PHOTOS_PER_POINT ? draft.photo : null;
+                    photoToSave = photoCount < MAX_PHOTOS_PER_POINT ? draft.photo : null;
+                } else {
+                    photoToSave = draft.photo;
+                }
+                if (photoToSave) {
+                    const dailyPhotos = await countUserPhotosToday(auth.currentUser.uid);
+                    if (dailyPhotos >= USER_DAILY_PHOTO_LIMIT) return showUserMessage(MSG.DAILY_PHOTO_LIMIT);
+                }
+                if (anchor) {
                     await addDoc(collection(db, "reports"), {
-                        type: currentProject, photo, kind: photo ? 'photo' : 'support', anchorId: anchor.id,
+                        type: currentProject, photo: photoToSave, kind: photoToSave ? 'photo' : 'support', anchorId: anchor.id,
                         lat: anchor.lat, lng: anchor.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce,
                         city: draft.il, district: draft.ilce, note, uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
                     });
