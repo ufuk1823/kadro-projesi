@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@900&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
-        :root { --kadro-red: #B71C1C; --kadro-dark: #2D2D2D; --kadro-bg: #f4f4f4; }
+        :root { --kadro-red: #B71C1C; --kadro-dark: #2D2D2D; --kadro-bg: #f4f4f4; --kadro-green: #16a34a; }
         body { font-family: 'Inter', sans-serif; background-color: var(--kadro-bg); color: var(--kadro-dark); -webkit-tap-highlight-color: transparent; }
         .view-section { display: none; }
         .view-section.active { display: block; animation: fadeIn 0.2s ease; }
@@ -24,11 +24,36 @@
         .heat-legend strong { color: #111827; }
         .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); }
         .heat-popup-title { font-weight: 900; font-size: 13px; margin-bottom: 4px; color: #111; }
-        .heat-popup-count { font-size: 12px; color: #B71C1C; font-weight: 700; margin-bottom: 6px; }
+        .heat-popup-count { font-size: 12px; color: var(--kadro-red); font-weight: 700; margin-bottom: 6px; }
         .heat-popup-link { font-size: 11px; color: #2563eb; text-decoration: underline; }
-        .btn-support { background: #16a34a; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 800; text-transform: uppercase; cursor: pointer; width: 100%; margin-top: 8px; }
-        .btn-support:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-support-card { background: #16a34a; color: #fff; border: none; border-radius: 10px; padding: 10px 14px; font-size: 10px; font-weight: 800; text-transform: uppercase; cursor: pointer; margin-top: 10px; }
+        .heat-popup-supported { font-size: 10px; font-weight: 700; color: var(--kadro-green); margin-top: 8px; text-transform: uppercase; }
+        button.btn-support,
+        button.btn-support-card {
+            background-color: var(--kadro-green);
+            color: #fff;
+            border: none;
+            font-family: inherit;
+            font-weight: 800;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        button.btn-support {
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 11px;
+            width: 100%;
+            margin-top: 8px;
+            display: block;
+        }
+        button.btn-support-card {
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 10px;
+            margin-top: 10px;
+            display: inline-block;
+        }
+        button.btn-support:disabled,
+        button.btn-support-card:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -243,7 +268,7 @@
             points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
                 const r = pt.mainReport;
                 const already = auth.currentUser && pt.reporters.has(auth.currentUser.uid);
-                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="text-[10px] font-bold text-green-700 mt-2 uppercase">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}</div></div>`;
+                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}</div></div>`;
             });
         }
 
@@ -259,7 +284,7 @@
             const already = auth.currentUser && point.reporters.has(auth.currentUser.uid);
             reverseStreetName(point.lat, point.lng).then(street => {
                 const mapsUrl = `https://www.google.com/maps?q=${point.lat},${point.lng}`;
-                const supportBlock = already ? '<p class="text-[10px] font-bold text-green-700 mt-2">✓ Bildirdiniz</p>' : supportButtonHtml(point.anchorId, true);
+                const supportBlock = already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(point.anchorId, true);
                 pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count" id="popup-count-${point.anchorId}">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>${supportBlock}`);
             });
             currentMapLayers.push({ circle, pin, point });
@@ -363,6 +388,35 @@
         window.login = () => signInWithPopup(auth, provider);
         window.logout = () => signOut(auth).then(()=>location.reload());
         window.saveNickname = async () => { const n = document.getElementById('nickname-input').value.trim(); await updateDoc(doc(db, "users", auth.currentUser.uid), { nickname: n }); document.getElementById('display-nick').innerText = n; alert("İsim Güncellendi!"); };
+
+        window.changeNeighborhood = () => {
+            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            getDoc(doc(db, "users", auth.currentUser.uid)).then(async (snap) => {
+                const ud = snap.data();
+                if (!ud?.neighborhood) return alert('Henüz kayıtlı mahalleniz yok. İlk bildiriminiz mahallenizi otomatik atar.');
+                if (ud.lastNeighChange?.toDate) {
+                    const daysSince = (Date.now() - ud.lastNeighChange.toDate().getTime()) / (1000 * 60 * 60 * 24);
+                    if (daysSince < 30) return alert('Adres değişikliği ayda yalnızca bir kez yapılabilir.');
+                }
+                navigator.geolocation.getCurrentPosition(async (pos) => {
+                    try {
+                        const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
+                        if (loc.neighborhood === ud.neighborhood && loc.il === (ud.il || ud.city) && loc.ilce === (ud.ilce || ud.district)) {
+                            return alert('Bulunduğunuz konum zaten kayıtlı mahallenizle aynı.');
+                        }
+                        const uRef = doc(db, "users", auth.currentUser.uid);
+                        await updateDoc(uRef, {
+                            neighborhood: loc.neighborhood, il: loc.il, ilce: loc.ilce,
+                            city: loc.il, district: loc.ilce, lastNeighChange: serverTimestamp()
+                        });
+                        const fullLocStr = formatFullLoc(loc);
+                        document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
+                        document.getElementById('panel-neighborhood').innerText = fullLocStr;
+                        alert(`Kayıtlı mahalleniz güncellendi: ${fullLocStr}`);
+                    } catch (e) { alert(e.message); }
+                }, () => alert('Bildirim yapmak için konumunuzu açmalısınız.'));
+            }).catch((e) => alert(e.message));
+        };
 
         window.handleCaptureStart = () => {
             if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');

@@ -1,0 +1,21 @@
+---
+description: Clean CSS tercihleri — profesyonel stil, !important ve inline style yok
+alwaysApply: true
+---
+
+# Clean CSS Standartları
+
+Kullanıcı bir şey sorduğunda en pratik değil, en profesyonel ve temiz (clean code) çözümü öner.
+
+## Stil kuralları
+
+- `!important` kullanma; özgüllük (specificity) ve doğru seçici sırasıyla çöz.
+- Inline `style="..."` attribute kullanma; sınıf veya CSS değişkeni kullan.
+- Projede `:root` CSS değişkenleri (`--kadro-red`, `--kadro-green` vb.) ve `<style>` bloğundaki semantik sınıflar tercih edilir.
+- Tailwind utility sınıfları HTML layout/kartlar için; dinamik/Leaflet popup içeriği için `<style>` bloğundaki semantik sınıflar kullanılır.
+- Tailwind preflight çakışmasında `button.sınıf-adı` gibi element+class seçicisi yeterli özgüllük sağlar.
+
+## Kod yazma
+
+- Kullanıcı açıkça emir vermedikçe kod yazma; soru soruyorsa yalnızca bilgi ver.
+- Stil refactor'unda yalnızca CSS/stil tanımlarına dokun; iş mantığına (harita, Firestore, hesaplamalar) dokunma.
