@@ -234,24 +234,22 @@
             return points;
         }
 
-        async function findNearbyAnchor(neighborhood, il, type, lat, lng) {
-            const q = query(collection(db, "reports"), where("neighborhood", "==", neighborhood), where("city", "==", il));
-            const qs = await getDocs(q);
+        function findNearbyAnchor(reports, type, lat, lng) {
+            const byId = new Map(reports.map(r => [r.id, r]));
             let best = null, bestDist = DUPLICATE_RADIUS_METERS + 1;
-            for (const d of qs.docs) {
-                const r = d.data();
+            for (const r of reports) {
                 if (r.type !== type) continue;
-                const anchorId = r.anchorId || d.id;
+                const anchorId = r.anchorId || r.id;
                 let anchorLat = r.lat, anchorLng = r.lng;
                 if (r.anchorId) {
-                    const aDoc = qs.docs.find(x => x.id === r.anchorId);
-                    if (aDoc) { anchorLat = aDoc.data().lat; anchorLng = aDoc.data().lng; }
+                    const anchorDoc = byId.get(r.anchorId);
+                    if (anchorDoc) { anchorLat = anchorDoc.lat; anchorLng = anchorDoc.lng; }
                 }
                 const dist = distanceMeters(anchorLat, anchorLng, lat, lng);
                 if (dist <= DUPLICATE_RADIUS_METERS && dist < bestDist) {
                     bestDist = dist;
-                    const aDoc = qs.docs.find(x => x.id === anchorId);
-                    best = { id: anchorId, ...(aDoc ? aDoc.data() : r) };
+                    const anchorDoc = byId.get(anchorId);
+                    best = { id: anchorId, ...(anchorDoc || r) };
                 }
             }
             return best;
@@ -454,7 +452,7 @@
             else if(ud.neighborhood !== draft.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
             try {
                 const { reports } = await loadNeighborhoodReports({ neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il });
-                const anchor = await findNearbyAnchor(draft.neighborhood, draft.il, currentProject, draft.lat, draft.lng);
+                const anchor = findNearbyAnchor(reports, currentProject, draft.lat, draft.lng);
                 const note = document.getElementById('report-note').value.trim();
                 if (anchor) {
                     if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return alert('Bu noktayı zaten bildirdiniz.');
