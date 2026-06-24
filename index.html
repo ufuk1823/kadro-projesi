@@ -6,6 +6,7 @@
     <title>KADRO.ORG — TÜRKİYE GENELİ V2.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@900&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         :root { --kadro-red: #B71C1C; --kadro-dark: #2D2D2D; --kadro-bg: #f4f4f4; --kadro-green: #16a34a; }
@@ -206,6 +207,10 @@
         const showUserMessage = (message) => alert(message);
         const showUserError = (error) => alert(error?.message || String(error));
         const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
+        const normLoc = (s) => (s || '').trim().toLocaleLowerCase('tr-TR');
+        const reportMatchesLoc = (report, il, ilce) =>
+            normLoc(report.il || report.city) === normLoc(il) &&
+            normLoc(report.ilce || report.district) === normLoc(ilce);
         const formatFullLoc = ({ neighborhood, ilce, il }) => `${neighborhood}, ${ilce}, ${il}`;
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
         const projectLabel = (t) => messages[t]?.title || t;
@@ -346,9 +351,29 @@
 
         async function loadNeighborhoodReports(ud) {
             const { il, ilce } = locFromDoc(ud);
-            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood), where("city", "==", il));
+            const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood));
             const qs = await getDocs(q);
-            return { reports: qs.docs.map(d => ({ id: d.id, ...d.data() })), il, ilce };
+            const reports = qs.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(r => reportMatchesLoc(r, il, ilce));
+            return { reports, il, ilce };
+        }
+
+        function ensureNeighborhoodMap() {
+            if (!window.L) return false;
+            if (!leafletMap) {
+                leafletMap = L.map('neighborhood-map').setView([39.0, 35.0], 6);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap);
+            }
+            return true;
+        }
+
+        function refreshMapSize() {
+            if (!leafletMap) return;
+            requestAnimationFrame(() => {
+                leafletMap.invalidateSize();
+                setTimeout(() => leafletMap.invalidateSize(), 350);
+            });
         }
 
         async function paintNeighborhoodMap(ud) {
@@ -356,22 +381,28 @@
             cachedMapReports = reports;
             cachedMapUser = ud;
             document.getElementById('map-location-label').innerText = `${il.toUpperCase()} / ${ilce.toUpperCase()} / ${ud.neighborhood.toUpperCase()} için mahalle sınırı ve canlı sorun haritası.`;
-            if (!leafletMap) { leafletMap = L.map('neighborhood-map').setView([39.0, 35.0], 6); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap); }
+            if (!ensureNeighborhoodMap()) return showUserMessage('Harita yüklenemedi. Lütfen sayfayı yenileyin.');
             clearMapLayers();
             try {
                 const qStr = `${ud.neighborhood} Mahallesi, ${ilce}, ${il}, Turkey`;
                 const cRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(qStr)}`);
                 const cData = await cRes.json();
-                if (cData.length > 0) { mapCenterCoords = [+cData[0].lat, +cData[0].lon]; leafletMap.setView(mapCenterCoords, 16); }
+                if (cData.length > 0) {
+                    mapCenterCoords = [+cData[0].lat, +cData[0].lon];
+                    leafletMap.setView(mapCenterCoords, 16);
+                } else if (reports.length > 0 && reports[0].lat != null && reports[0].lng != null) {
+                    mapCenterCoords = [+reports[0].lat, +reports[0].lng];
+                    leafletMap.setView(mapCenterCoords, 16);
+                }
             } catch (e) {}
             if (reports.length === 0) {
                 document.getElementById('no-reports-msg').classList.remove('hidden');
                 document.getElementById('reports-list').innerHTML = '';
-                return;
+            } else {
+                document.getElementById('no-reports-msg').classList.add('hidden');
+                refreshHeatLayers(groupReportsIntoPoints(reports));
             }
-            document.getElementById('no-reports-msg').classList.add('hidden');
-            refreshHeatLayers(groupReportsIntoPoints(reports));
-            setTimeout(() => leafletMap.invalidateSize(), 400);
+            refreshMapSize();
         }
 
         function streetCacheKey(lat, lng) {
@@ -401,6 +432,7 @@
         }
 
         function clearMapLayers() {
+            if (!leafletMap) return;
             currentMapLayers.forEach(layer => {
                 if (layer.circle) leafletMap.removeLayer(layer.circle);
                 if (layer.pin) leafletMap.removeLayer(layer.pin);
@@ -416,7 +448,7 @@
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active')); 
             document.getElementById(id).classList.add('active'); 
             window.scrollTo(0,0);
-            if(id === 'neighborhood-view' && leafletMap) { setTimeout(() => { leafletMap.invalidateSize(); }, 400); }
+            if(id === 'neighborhood-view' && leafletMap) refreshMapSize();
         };
 
         window.openProject = (t) => { currentProject = t; document.getElementById('project-title').innerText = messages[t].title; document.getElementById('project-desc').innerText = messages[t].desc; document.getElementById('report-note').placeholder = messages[t].p; showView('project-detail'); };
@@ -644,15 +676,16 @@
 
         window.viewNeighborhoodReport = async () => {
             if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
-            const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
-            if(!ud.neighborhood) return showUserMessage(MSG.NEED_FIRST_REPORT);
-            showView('neighborhood-view');
-            await paintNeighborhoodMap(ud);
+            try {
+                const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
+                if(!ud.neighborhood) return showUserMessage(MSG.NEED_FIRST_REPORT);
+                showView('neighborhood-view');
+                await paintNeighborhoodMap(ud);
+            } catch (e) { showUserError(e); }
         };
 
         window.closeCamera = () => { if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; };
         window.closePreview = () => { document.getElementById('preview-scrim').style.display='none'; handleCaptureStart(); };
     </script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </body>
 </html>
