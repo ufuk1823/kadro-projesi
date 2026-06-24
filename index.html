@@ -394,9 +394,21 @@
             getDoc(doc(db, "users", auth.currentUser.uid)).then(async (snap) => {
                 const ud = snap.data();
                 if (!ud?.neighborhood) return alert('Henüz kayıtlı mahalleniz yok. İlk bildiriminiz mahallenizi otomatik atar.');
-                if (ud.lastNeighChange?.toDate) {
-                    const daysSince = (Date.now() - ud.lastNeighChange.toDate().getTime()) / (1000 * 60 * 60 * 24);
-                    if (daysSince < 30) return alert('Adres değişikliği ayda yalnızca bir kez yapılabilir.');
+                if (ud.lastNeighChange) {
+                    try {
+                        const lastChangeDate = ud.lastNeighChange.toDate ? ud.lastNeighChange.toDate() : new Date(ud.lastNeighChange);
+                        if (Number.isNaN(lastChangeDate.getTime())) throw new Error('invalid date');
+                        const lastChangeIso = lastChangeDate.toISOString().slice(0, 10);
+                        const [y, m, d] = lastChangeIso.split('-').map(Number);
+                        const nextAllowedDate = new Date(Date.UTC(y, m - 1, d + 30));
+                        const nextAllowedIso = nextAllowedDate.toISOString().slice(0, 10);
+                        const todayIso = new Date().toISOString().slice(0, 10);
+                        if (todayIso < nextAllowedIso) {
+                            return alert(`Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${nextAllowedIso} tarihini bekleyiniz.`);
+                        }
+                    } catch (e) {
+                        return alert('Mahalle güncelleme tarihi okunamadı. Lütfen daha sonra tekrar deneyin.');
+                    }
                 }
                 navigator.geolocation.getCurrentPosition(async (pos) => {
                     try {
