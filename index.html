@@ -177,7 +177,27 @@
         let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
         const streetNameCache = new Map(), streetNamePending = new Map();
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
+        const PHOTO_MAX_WIDTH = 1024, MAX_PHOTOS_PER_POINT = 3, PHOTO_JPEG_QUALITY = 0.8;
+        const NEIGHBORHOOD_CHANGE_COOLDOWN_DAYS = 30;
         const KADRO_RED = '#B71C1C';
+        const MSG = {
+            AUTH_REQUIRED: 'Katkı sunmak için lütfen giriş yapın',
+            NO_NEIGHBORHOOD: 'Henüz kayıtlı mahalleniz yok. İlk bildiriminiz mahallenizi otomatik atar.',
+            NEIGHBORHOOD_DATE_PARSE_ERROR: 'Mahalle güncelleme tarihi okunamadı. Lütfen daha sonra tekrar deneyin.',
+            SAME_NEIGHBORHOOD: 'Bulunduğunuz konum zaten kayıtlı mahallenizle aynı.',
+            LOCATION_REQUIRED: 'Bildirim yapmak için konumunuzu açmalısınız.',
+            LOCATION_PERMISSION: 'Konum İzni Gerekli!',
+            CAMERA_ERROR: 'Kamera hatası!',
+            ALREADY_REPORTED: 'Bu noktayı zaten bildirdiniz.',
+            ANCHOR_NOT_FOUND: 'Sorun noktası bulunamadı.',
+            NEED_FIRST_REPORT: 'Önce bir bildirim yapmalısınız.',
+            NEED_NEIGHBORHOOD_FOR_SUPPORT: 'Önce bir bildirim yaparak mahallenizi atayın.',
+            neighborhoodMismatch: (name) => `Sadece kayıtlı olduğunuz ${name} mahallesinde bildirim yapabilirsiniz.`,
+            neighborhoodChangeWait: (date) => `Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${date} tarihini bekleyiniz.`,
+            neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
+        };
+        const showUserMessage = (message) => alert(message);
+        const showUserError = (error) => alert(error?.message || String(error));
         const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
         const formatFullLoc = ({ neighborhood, ilce, il }) => `${neighborhood}, ${ilce}, ${il}`;
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
@@ -204,7 +224,7 @@
             return reports.filter(r => r.photo && (r.id === anchorId || r.anchorId === anchorId)).length;
         }
 
-        function groupReportsIntoPoints(reports) {
+        function buildProblemPoints(reports) {
             const byAnchor = new Map();
             const standalone = [];
             for (const report of reports) {
@@ -217,9 +237,13 @@
             }
             const points = [];
             for (const [anchorId, group] of byAnchor) {
-                const anchor = group.find(r => r.id === anchorId) || group[0];
+                const anchorReport = group.find(r => r.id === anchorId) || group[0];
                 const reporters = new Set(group.map(r => r.uid));
-                points.push({ lat: anchor.lat, lng: anchor.lng, type: anchor.type, anchorId, reporters, reports: group, reporterCount: reporters.size, mainReport: group.find(r => r.photo) || anchor });
+                points.push({
+                    lat: anchorReport.lat, lng: anchorReport.lng, type: anchorReport.type, anchorId, anchorReport,
+                    reporters, reports: group, reporterCount: reporters.size,
+                    mainReport: group.find(r => r.photo) || anchorReport
+                });
             }
             for (const report of standalone) {
                 let matched = points.find(pt => pt.type === report.type && distanceMeters(pt.lat, pt.lng, report.lat, report.lng) <= DUPLICATE_RADIUS_METERS);
@@ -229,28 +253,27 @@
                     matched.reporterCount = matched.reporters.size;
                     if (report.photo && !matched.mainReport.photo) matched.mainReport = report;
                 } else {
-                    points.push({ lat: report.lat, lng: report.lng, type: report.type, anchorId: report.id, reporters: new Set([report.uid]), reports: [report], reporterCount: 1, mainReport: report });
+                    points.push({
+                        lat: report.lat, lng: report.lng, type: report.type, anchorId: report.id, anchorReport: report,
+                        reporters: new Set([report.uid]), reports: [report], reporterCount: 1, mainReport: report
+                    });
                 }
             }
             return points;
         }
 
+        function groupReportsIntoPoints(reports) {
+            return buildProblemPoints(reports);
+        }
+
         function findNearbyAnchor(reports, type, lat, lng) {
-            const byId = new Map(reports.map(r => [r.id, r]));
             let best = null, bestDist = DUPLICATE_RADIUS_METERS + 1;
-            for (const r of reports) {
-                if (r.type !== type) continue;
-                const anchorId = r.anchorId || r.id;
-                let anchorLat = r.lat, anchorLng = r.lng;
-                if (r.anchorId) {
-                    const anchorDoc = byId.get(r.anchorId);
-                    if (anchorDoc) { anchorLat = anchorDoc.lat; anchorLng = anchorDoc.lng; }
-                }
-                const dist = distanceMeters(anchorLat, anchorLng, lat, lng);
+            for (const pt of buildProblemPoints(reports)) {
+                if (pt.type !== type) continue;
+                const dist = distanceMeters(pt.lat, pt.lng, lat, lng);
                 if (dist <= DUPLICATE_RADIUS_METERS && dist < bestDist) {
                     bestDist = dist;
-                    const anchorDoc = byId.get(anchorId);
-                    best = { id: anchorId, ...(anchorDoc || r) };
+                    best = { id: pt.anchorId, ...pt.anchorReport };
                 }
             }
             return best;
@@ -407,31 +430,31 @@
         window.saveNickname = async () => { const n = document.getElementById('nickname-input').value.trim(); await updateDoc(doc(db, "users", auth.currentUser.uid), { nickname: n }); document.getElementById('display-nick').innerText = n; alert("İsim Güncellendi!"); };
 
         window.changeNeighborhood = () => {
-            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             getDoc(doc(db, "users", auth.currentUser.uid)).then(async (snap) => {
                 const ud = snap.data();
-                if (!ud?.neighborhood) return alert('Henüz kayıtlı mahalleniz yok. İlk bildiriminiz mahallenizi otomatik atar.');
+                if (!ud?.neighborhood) return showUserMessage(MSG.NO_NEIGHBORHOOD);
                 if (ud.lastNeighChange) {
                     try {
                         const lastChangeDate = ud.lastNeighChange.toDate ? ud.lastNeighChange.toDate() : new Date(ud.lastNeighChange);
                         if (Number.isNaN(lastChangeDate.getTime())) throw new Error('invalid date');
                         const lastChangeIso = lastChangeDate.toISOString().slice(0, 10);
                         const [y, m, d] = lastChangeIso.split('-').map(Number);
-                        const nextAllowedDate = new Date(Date.UTC(y, m - 1, d + 30));
+                        const nextAllowedDate = new Date(Date.UTC(y, m - 1, d + NEIGHBORHOOD_CHANGE_COOLDOWN_DAYS));
                         const nextAllowedIso = nextAllowedDate.toISOString().slice(0, 10);
                         const todayIso = new Date().toISOString().slice(0, 10);
                         if (todayIso < nextAllowedIso) {
-                            return alert(`Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${nextAllowedIso} tarihini bekleyiniz.`);
+                            return showUserMessage(MSG.neighborhoodChangeWait(nextAllowedIso));
                         }
                     } catch (e) {
-                        return alert('Mahalle güncelleme tarihi okunamadı. Lütfen daha sonra tekrar deneyin.');
+                        return showUserMessage(MSG.NEIGHBORHOOD_DATE_PARSE_ERROR);
                     }
                 }
                 navigator.geolocation.getCurrentPosition(async (pos) => {
                     try {
                         const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
                         if (loc.neighborhood === ud.neighborhood && loc.il === (ud.il || ud.city) && loc.ilce === (ud.ilce || ud.district)) {
-                            return alert('Bulunduğunuz konum zaten kayıtlı mahallenizle aynı.');
+                            return showUserMessage(MSG.SAME_NEIGHBORHOOD);
                         }
                         const uRef = doc(db, "users", auth.currentUser.uid);
                         await updateDoc(uRef, {
@@ -441,42 +464,42 @@
                         const fullLocStr = formatFullLoc(loc);
                         document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
                         document.getElementById('panel-neighborhood').innerText = fullLocStr;
-                        alert(`Kayıtlı mahalleniz güncellendi: ${fullLocStr}`);
-                    } catch (e) { alert(e.message); }
-                }, () => alert('Bildirim yapmak için konumunuzu açmalısınız.'));
-            }).catch((e) => alert(e.message));
+                        showUserMessage(MSG.neighborhoodUpdated(fullLocStr));
+                    } catch (e) { showUserError(e); }
+                }, () => showUserMessage(MSG.LOCATION_REQUIRED));
+            }).catch((e) => showUserError(e));
         };
 
         window.handleCaptureStart = () => {
-            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const loc = await detectFullLocation(pos.coords.latitude, pos.coords.longitude);
                 draft.lat = pos.coords.latitude; draft.lng = pos.coords.longitude;
                 draft.neighborhood = loc.neighborhood; draft.il = loc.il; draft.ilce = loc.ilce;
-                try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); document.getElementById('video').srcObject = camStream; document.getElementById('camera-interface').style.display = 'flex'; } catch(e) { alert("Kamera hatası!"); }
-            }, () => alert("Konum İzni Gerekli!"));
+                try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); document.getElementById('video').srcObject = camStream; document.getElementById('camera-interface').style.display = 'flex'; } catch(e) { showUserMessage(MSG.CAMERA_ERROR); }
+            }, () => showUserMessage(MSG.LOCATION_PERMISSION));
         };
 
         window.takeSnapshot = () => {
             const v = document.getElementById('video'), c = document.createElement('canvas');
-            const s = Math.min(1, 1024 / v.videoWidth); c.width = v.videoWidth * s; c.height = v.videoHeight * s;
-            c.getContext('2d').drawImage(v,0,0,c.width,c.height); draft.photo = c.toDataURL('image/jpeg', 0.8);
+            const s = Math.min(1, PHOTO_MAX_WIDTH / v.videoWidth); c.width = v.videoWidth * s; c.height = v.videoHeight * s;
+            c.getContext('2d').drawImage(v,0,0,c.width,c.height); draft.photo = c.toDataURL('image/jpeg', PHOTO_JPEG_QUALITY);
             document.getElementById('photo-preview').src = draft.photo; if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; document.getElementById('preview-scrim').style.display='flex';
         };
 
         window.finalizeReport = async () => {
-            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             const uRef = doc(db, "users", auth.currentUser.uid), uSnap = await getDoc(uRef), ud = uSnap.data();
             if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, lastNeighChange: serverTimestamp() });
-            else if(ud.neighborhood !== draft.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
+            else if(ud.neighborhood !== draft.neighborhood) return showUserMessage(MSG.neighborhoodMismatch(ud.neighborhood));
             try {
                 const { reports } = await loadNeighborhoodReports({ neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il });
                 const anchor = findNearbyAnchor(reports, currentProject, draft.lat, draft.lng);
                 const note = document.getElementById('report-note').value.trim();
                 if (anchor) {
-                    if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return alert('Bu noktayı zaten bildirdiniz.');
+                    if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return showUserMessage(MSG.ALREADY_REPORTED);
                     const photoCount = countPhotosAtPoint(reports, anchor.id);
-                    const photo = photoCount < 3 ? draft.photo : null;
+                    const photo = photoCount < MAX_PHOTOS_PER_POINT ? draft.photo : null;
                     await addDoc(collection(db, "reports"), {
                         type: currentProject, photo, kind: photo ? 'photo' : 'support', anchorId: anchor.id,
                         lat: anchor.lat, lng: anchor.lng, neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce,
@@ -498,20 +521,20 @@
                     document.getElementById('panel-neighborhood').innerText = fullLocStr;
                 }
                 await viewNeighborhoodReport();
-            } catch(e) { alert(e.message); }
+            } catch(e) { showUserError(e); }
         };
 
         window.supportReport = async (anchorId) => {
-            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             try {
                 const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
-                if (!ud?.neighborhood) return alert('Önce bir bildirim yaparak mahallenizi atayın.');
+                if (!ud?.neighborhood) return showUserMessage(MSG.NEED_NEIGHBORHOOD_FOR_SUPPORT);
                 const anchorSnap = await getDoc(doc(db, "reports", anchorId));
-                if (!anchorSnap.exists()) return alert('Sorun noktası bulunamadı.');
+                if (!anchorSnap.exists()) return showUserMessage(MSG.ANCHOR_NOT_FOUND);
                 const anchor = anchorSnap.data();
-                if (ud.neighborhood !== anchor.neighborhood) return alert(`Sadece kayıtlı olduğunuz ${ud.neighborhood} mahallesinde bildirim yapabilirsiniz.`);
+                if (ud.neighborhood !== anchor.neighborhood) return showUserMessage(MSG.neighborhoodMismatch(ud.neighborhood));
                 const { reports } = await loadNeighborhoodReports(ud);
-                if (userAlreadyAtPoint(reports, anchorId, auth.currentUser.uid)) return alert('Bu noktayı zaten bildirdiniz.');
+                if (userAlreadyAtPoint(reports, anchorId, auth.currentUser.uid)) return showUserMessage(MSG.ALREADY_REPORTED);
                 await addDoc(collection(db, "reports"), {
                     type: anchor.type, photo: null, kind: 'support', anchorId,
                     lat: anchor.lat, lng: anchor.lng, neighborhood: anchor.neighborhood,
@@ -520,13 +543,13 @@
                     note: '', uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
                 });
                 if (cachedMapUser) await paintNeighborhoodMap(cachedMapUser);
-            } catch (e) { alert(e.message); }
+            } catch (e) { showUserError(e); }
         };
 
         window.viewNeighborhoodReport = async () => {
-            if (!auth.currentUser) return alert('Katkı sunmak için lütfen giriş yapın');
+            if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
-            if(!ud.neighborhood) return alert("Önce bir bildirim yapmalısınız.");
+            if(!ud.neighborhood) return showUserMessage(MSG.NEED_FIRST_REPORT);
             showView('neighborhood-view');
             await paintNeighborhoodMap(ud);
         };
