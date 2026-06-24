@@ -172,7 +172,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
 
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
@@ -239,14 +239,15 @@
 
         async function countUserPhotosToday(uid) {
             const { start, end } = getIstanbulDayRange();
-            const q = query(
-                collection(db, "reports"),
-                where("uid", "==", uid),
-                where("createdAt", ">=", Timestamp.fromDate(start)),
-                where("createdAt", "<", Timestamp.fromDate(end))
-            );
+            const q = query(collection(db, "reports"), where("uid", "==", uid));
             const qs = await getDocs(q);
-            return qs.docs.filter(d => d.data().photo).length;
+            return qs.docs.filter(d => {
+                const data = d.data();
+                if (!data.photo) return false;
+                const created = data.createdAt?.toDate?.();
+                if (!created) return false;
+                return created >= start && created < end;
+            }).length;
         }
 
         function buildProblemPoints(reports) {
