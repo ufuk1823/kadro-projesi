@@ -55,6 +55,8 @@
         button.btn-support:disabled,
         button.btn-support-card:disabled { opacity: 0.5; cursor: not-allowed; }
         .feedback-scrim { z-index: 5000; }
+        .feedback-scrim--dismissible { cursor: pointer; }
+        .feedback-panel { cursor: default; }
     </style>
 </head>
 <body>
@@ -166,8 +168,8 @@
     <!-- KAMERA VE ÖNİZLEME OVERLAYLARI -->
     <div id="camera-interface" class="camera-overlay"><video id="video" autoplay playsinline muted></video><div class="absolute bottom-10 flex gap-4 w-full px-10 z-[4000] text-white"><button onclick="closeCamera()" class="flex-1 bg-white/20 backdrop-blur py-5 rounded-2xl font-black uppercase">İPTAL</button><button onclick="takeSnapshot()" class="flex-1 bg-[#B71C1C] py-5 rounded-2xl font-black text-xl uppercase shadow-2xl">ÇEK</button></div></div>
     <div id="preview-scrim" class="preview-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"><h3 class="font-black uppercase mb-4 text-[#B71C1C]">Bildirim Gönderin</h3><img id="photo-preview" class="w-full h-48 object-cover rounded-2xl mb-4 border border-gray-100 shadow-sm"><div class="mb-4"><label class="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Notunuzu İletebilirsiniz <span class="text-gray-300">(İsteğe Bağlı)</span></label><textarea id="report-note" class="w-full bg-gray-50 border border-gray-100 rounded-xl p-3 text-sm focus:border-[#B71C1C] outline-none text-[#2D2D2D]" rows="3"></textarea></div><div class="flex gap-3 mt-6"><button onclick="closePreview()" class="flex-1 bg-gray-100 text-gray-500 py-4 rounded-xl font-bold uppercase text-xs">Yeniden Çek</button><button onclick="finalizeReport()" id="confirm-send-btn" class="flex-1 bg-[#B71C1C] text-white py-4 rounded-xl font-black uppercase text-xs shadow-lg">GÖNDER</button></div></div></div>
-    <div id="success-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p id="success-scrim-msg" class="text-sm font-bold text-gray-700 leading-relaxed mb-6"></p><button type="button" onclick="closePhotoSuccessModal()" class="bg-[#B71C1C] text-white w-full py-4 rounded-xl font-black uppercase text-xs">Tamam</button></div></div>
-    <div id="point-full-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p class="text-sm font-bold text-gray-700 leading-relaxed mb-6">Bu sorun noktası daha önce 3 üyemiz tarafından bildirildi. İsterseniz &ldquo;Ben de Bildiriyorum&rdquo; diyerek katkıda bulunabilirsiniz.</p><button type="button" class="btn-support-card w-full mb-3" onclick="supportFromPointFullModal()">Ben de Bildiriyorum</button><button type="button" onclick="closePointFullModal()" class="bg-gray-100 text-gray-500 w-full py-3 rounded-xl font-bold uppercase text-xs">Vazgeç</button></div></div>
+    <div id="success-scrim" class="preview-scrim feedback-scrim feedback-scrim--dismissible" onclick="closePhotoSuccessModal()"><div class="feedback-panel bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center" onclick="event.stopPropagation()"><p id="success-scrim-msg" class="text-sm font-bold text-gray-700 leading-relaxed"></p></div></div>
+    <div id="point-full-scrim" class="preview-scrim feedback-scrim"><div class="feedback-panel bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p class="text-sm font-bold text-gray-700 leading-relaxed mb-6">Bu sorun noktası daha önce 3 üyemiz tarafından bildirildi. İsterseniz &ldquo;Ben de Bildiriyorum&rdquo; diyerek katkıda bulunabilirsiniz.</p><div class="flex gap-3"><button type="button" class="btn-support-card flex-1" onclick="supportFromPointFullModal()">Ben de Bildiriyorum</button><button type="button" class="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-bold uppercase text-xs" onclick="closePointFullModalDelayed()">Vazgeç</button></div></div></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
@@ -177,11 +179,12 @@
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
 
-        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, pendingPointFullAnchorId = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
+        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, pendingPointFullAnchorId = null, feedbackCloseTimer = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
         const streetNameCache = new Map(), streetNamePending = new Map();
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
         const PHOTO_MAX_WIDTH = 1024, MAX_PHOTOS_PER_POINT = 3, PHOTO_JPEG_QUALITY = 0.8;
         const USER_DAILY_PHOTO_LIMIT = 3, NEIGHBORHOOD_CHANGE_COOLDOWN_DAYS = 30;
+        const FEEDBACK_CLOSE_DELAY_MS = 1000, SUPPORT_SUCCESS_DISPLAY_MS = 2000;
         const ISTANBUL_TZ = 'Europe/Istanbul';
         const KADRO_RED = '#B71C1C';
         const MSG = {
@@ -511,6 +514,10 @@
             document.getElementById('photo-preview').src = draft.photo; if(camStream) camStream.getTracks().forEach(t=>t.stop()); document.getElementById('camera-interface').style.display='none'; document.getElementById('preview-scrim').style.display='flex';
         };
 
+        function clearFeedbackTimers() {
+            if (feedbackCloseTimer) { clearTimeout(feedbackCloseTimer); feedbackCloseTimer = null; }
+        }
+
         function resetDraftForm() {
             document.getElementById('preview-scrim').style.display = 'none';
             document.getElementById('report-note').value = '';
@@ -518,33 +525,49 @@
         }
 
         window.showPhotoSuccessModal = () => {
+            clearFeedbackTimers();
             document.getElementById('success-scrim-msg').innerText = MSG.PHOTO_SAVED;
             document.getElementById('success-scrim').style.display = 'flex';
         };
 
         window.closePhotoSuccessModal = async () => {
+            clearFeedbackTimers();
             document.getElementById('success-scrim').style.display = 'none';
             await viewNeighborhoodReport();
         };
 
         window.showPointFullModal = (anchorId) => {
+            clearFeedbackTimers();
             pendingPointFullAnchorId = anchorId;
             document.getElementById('preview-scrim').style.display = 'none';
             document.getElementById('point-full-scrim').style.display = 'flex';
         };
 
         window.closePointFullModal = () => {
+            clearFeedbackTimers();
             pendingPointFullAnchorId = null;
             document.getElementById('point-full-scrim').style.display = 'none';
             resetDraftForm();
         };
 
+        window.closePointFullModalDelayed = () => {
+            clearFeedbackTimers();
+            feedbackCloseTimer = setTimeout(closePointFullModal, FEEDBACK_CLOSE_DELAY_MS);
+        };
+
         window.supportFromPointFullModal = async () => {
             const anchorId = pendingPointFullAnchorId;
             if (!anchorId) return;
-            closePointFullModal();
-            await supportReport(anchorId);
-            await viewNeighborhoodReport();
+            pendingPointFullAnchorId = null;
+            document.getElementById('point-full-scrim').style.display = 'none';
+            resetDraftForm();
+            try {
+                await supportReport(anchorId);
+                document.getElementById('success-scrim-msg').innerText = MSG.PHOTO_SAVED;
+                document.getElementById('success-scrim').style.display = 'flex';
+                clearFeedbackTimers();
+                feedbackCloseTimer = setTimeout(closePhotoSuccessModal, SUPPORT_SUCCESS_DISPLAY_MS + FEEDBACK_CLOSE_DELAY_MS);
+            } catch (e) { showUserError(e); }
         };
 
         window.finalizeReport = async () => {
