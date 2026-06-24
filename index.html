@@ -175,6 +175,7 @@
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
 
         let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
+        const streetNameCache = new Map(), streetNamePending = new Map();
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
         const KADRO_RED = '#B71C1C';
         const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
@@ -324,12 +325,30 @@
             setTimeout(() => leafletMap.invalidateSize(), 400);
         }
 
+        function streetCacheKey(lat, lng) {
+            return `${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
+        }
+
         async function reverseStreetName(lat, lng) {
-            try {
-                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=tr`);
-                const addr = (await r.json()).address || {};
-                return addr.road || addr.pedestrian || addr.footway || addr.street || 'Konum';
-            } catch { return 'Konum'; }
+            const key = streetCacheKey(lat, lng);
+            if (streetNameCache.has(key)) return streetNameCache.get(key);
+            if (streetNamePending.has(key)) return streetNamePending.get(key);
+            const request = (async () => {
+                try {
+                    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=tr`);
+                    const addr = (await r.json()).address || {};
+                    const street = addr.road || addr.pedestrian || addr.footway || addr.street || 'Konum';
+                    streetNameCache.set(key, street);
+                    return street;
+                } catch {
+                    streetNameCache.set(key, 'Konum');
+                    return 'Konum';
+                } finally {
+                    streetNamePending.delete(key);
+                }
+            })();
+            streetNamePending.set(key, request);
+            return request;
         }
 
         function clearMapLayers() {
