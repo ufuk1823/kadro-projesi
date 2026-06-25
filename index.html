@@ -196,6 +196,7 @@
     <div id="success-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p id="success-scrim-msg" class="text-sm font-bold text-gray-700 leading-relaxed"></p></div></div>
     <div id="point-full-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p class="text-sm font-bold text-gray-700 leading-relaxed mb-6">Bu sorun noktası daha önce 3 üyemiz tarafından bildirildi. İsterseniz &ldquo;Ben de Bildiriyorum&rdquo; diyerek katkıda bulunabilirsiniz.</p><div class="flex gap-3"><button type="button" class="btn-support-card flex-1" onclick="supportFromPointFullModal()">Ben de Bildiriyorum</button><button type="button" class="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-bold uppercase text-xs" onclick="closePointFullModalDelayed()">Vazgeç</button></div></div></div>
     <div id="location-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p class="text-sm font-bold text-gray-700 leading-relaxed mb-6">Mahalle raporunuzu görüntülemek için konumunuzu açın.</p><button type="button" onclick="requestNeighborhoodLocation()" class="bg-[#B71C1C] text-white w-full py-4 rounded-xl font-black uppercase text-xs mb-3">Konumumu Aç</button><button type="button" onclick="closeLocationScrim()" class="bg-gray-100 text-gray-500 w-full py-3 rounded-xl font-bold uppercase text-xs">Vazgeç</button></div></div>
+    <div id="profile-required-scrim" class="preview-scrim feedback-scrim"><div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center"><p class="text-sm font-bold text-gray-700 leading-relaxed mb-6">Raporlama yapabilmeniz için profilinize girip mahallenizi atayabilirsiniz.</p><div class="flex gap-3"><button type="button" class="flex-1 bg-[#B71C1C] text-white py-3 rounded-xl font-black uppercase text-xs" onclick="goToUserProfileFromModal()">Profilime Git</button><button type="button" class="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-bold uppercase text-xs" onclick="closeProfileRequiredModal()">Kapat</button></div></div></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
@@ -749,7 +750,7 @@
             if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             try {
                 const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
-                if (!ud?.neighborhood) return showUserMessage(MSG.NEED_NEIGHBORHOOD_FOR_SUPPORT);
+                if (!userHasRegisteredAddress(ud)) return showProfileRequiredModal();
                 const anchorSnap = await getDoc(doc(db, "reports", anchorId));
                 if (!anchorSnap.exists()) return showUserMessage(MSG.ANCHOR_NOT_FOUND);
                 const anchor = anchorSnap.data();
@@ -773,6 +774,19 @@
 
         window.closeLocationScrim = () => {
             document.getElementById('location-scrim').style.display = 'none';
+        };
+
+        window.showProfileRequiredModal = () => {
+            document.getElementById('profile-required-scrim').style.display = 'flex';
+        };
+
+        window.closeProfileRequiredModal = () => {
+            document.getElementById('profile-required-scrim').style.display = 'none';
+        };
+
+        window.goToUserProfileFromModal = () => {
+            closeProfileRequiredModal();
+            showView('user-panel');
         };
 
         async function openNeighborhoodReportForLocation(loc) {
