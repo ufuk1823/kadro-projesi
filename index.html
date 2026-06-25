@@ -55,6 +55,32 @@
         }
         button.btn-support:disabled,
         button.btn-support-card:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.btn-moderator-delete,
+        button.btn-moderator-delete-sm {
+            background-color: #fff;
+            color: var(--kadro-red);
+            border: 2px solid var(--kadro-red);
+            font-family: inherit;
+            font-weight: 800;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        button.btn-moderator-delete {
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 10px;
+            margin-top: 8px;
+            display: inline-block;
+            width: 100%;
+        }
+        button.btn-moderator-delete-sm {
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 10px;
+            margin-top: 8px;
+            display: block;
+            width: 100%;
+        }
         .feedback-scrim { z-index: 5000; }
     </style>
 </head>
@@ -174,7 +200,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
 
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
@@ -187,6 +213,7 @@
         const FEEDBACK_CLOSE_DELAY_MS = 1000, SUPPORT_SUCCESS_DISPLAY_MS = 2000;
         const ISTANBUL_TZ = 'Europe/Istanbul';
         const KADRO_RED = '#B71C1C';
+        const MODERATOR_EMAIL = 'ufuk.kop33@gmail.com';
         const MSG = {
             AUTH_REQUIRED: 'Katkı sunmak için lütfen giriş yapın',
             NO_NEIGHBORHOOD: 'Henüz kayıtlı mahalleniz yok. İlk bildiriminiz mahallenizi otomatik atar.',
@@ -202,6 +229,8 @@
             DAILY_PHOTO_LIMIT: 'Günlük konumlu fotoğraf limitinize (3) ulaştınız. Yarın tekrar deneyebilir veya "Ben de Bildiriyorum" ile destek verebilirsiniz.',
             PHOTO_SAVED: 'Raporun sisteme işlendi. Mahallemize bir katkı sağladın.',
             VIEW_REPORT_LOCATION: 'Mahalle raporunuzu görüntülemek için konumunuzu açın.',
+            MODERATOR_ONLY: 'Bu işlem yalnızca moderatör içindir.',
+            POINT_DELETED: 'Sorun noktası silindi.',
             neighborhoodMismatch: (name) => `Sadece kayıtlı olduğunuz ${name} mahallesinde bildirim yapabilirsiniz.`,
             neighborhoodChangeWait: (date) => `Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${date} tarihini bekleyiniz.`,
             neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
@@ -238,6 +267,10 @@
         }
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
         const projectLabel = (t) => messages[t]?.title || t;
+
+        function isModerator() {
+            return auth.currentUser?.email?.toLowerCase() === MODERATOR_EMAIL.toLowerCase();
+        }
 
         function distanceMeters(lat1, lng1, lat2, lng2) {
             const R = 6371000, toRad = d => d * Math.PI / 180;
@@ -339,13 +372,19 @@
             return `<button type="button" class="${cls}" onclick="supportReport('${anchorId}')">Ben de Bildiriyorum</button>`;
         }
 
+        function moderatorDeleteButtonHtml(anchorId, compact) {
+            if (!isModerator()) return '';
+            const cls = compact ? 'btn-moderator-delete-sm' : 'btn-moderator-delete';
+            return `<button type="button" class="${cls}" onclick="moderatorDeletePoint('${anchorId}')">Noktayı Sil</button>`;
+        }
+
         function renderReportsList(points) {
             const list = document.getElementById('reports-list');
             list.innerHTML = '';
             points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
                 const r = pt.mainReport;
                 const already = auth.currentUser && pt.reporters.has(auth.currentUser.uid);
-                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}</div></div>`;
+                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}${moderatorDeleteButtonHtml(pt.anchorId, false)}</div></div>`;
             });
         }
 
@@ -362,7 +401,7 @@
             reverseStreetName(point.lat, point.lng).then(street => {
                 const mapsUrl = `https://www.google.com/maps?q=${point.lat},${point.lng}`;
                 const supportBlock = already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(point.anchorId, true);
-                pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count" id="popup-count-${point.anchorId}">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>${supportBlock}`);
+                pin.bindPopup(`<div class="heat-popup-title">${street}</div><div class="heat-popup-count" id="popup-count-${point.anchorId}">${countLabel}</div><a class="heat-popup-link" href="${mapsUrl}" target="_blank" rel="noopener">Haritada aç</a>${supportBlock}${moderatorDeleteButtonHtml(point.anchorId, true)}`);
             });
             currentMapLayers.push({ circle, pin, point });
         }
@@ -683,6 +722,21 @@
                 }
                 showPhotoSuccessModal();
             } catch(e) { showUserError(e); }
+        };
+
+        window.moderatorDeletePoint = async (anchorId) => {
+            if (!isModerator()) return showUserMessage(MSG.MODERATOR_ONLY);
+            const related = cachedMapReports.filter(r => r.id === anchorId || r.anchorId === anchorId);
+            if (!related.length) return showUserMessage(MSG.ANCHOR_NOT_FOUND);
+            const photoCount = related.filter(r => r.photo).length;
+            const supportCount = related.length - photoCount;
+            const detail = photoCount ? `${photoCount} fotoğraf${supportCount ? `, ${supportCount} destek` : ''}` : `${related.length} bildirim`;
+            if (!confirm(`Bu sorun noktasını silmek istediğinize emin misiniz?\n(${detail})`)) return;
+            try {
+                await Promise.all(related.map(r => deleteDoc(doc(db, "reports", r.id))));
+                showUserMessage(MSG.POINT_DELETED);
+                if (cachedMapUser) await paintNeighborhoodMap(cachedMapUser);
+            } catch (e) { showUserError(e); }
         };
 
         window.supportReport = async (anchorId) => {
