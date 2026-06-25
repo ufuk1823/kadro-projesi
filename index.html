@@ -206,12 +206,34 @@
         };
         const showUserMessage = (message) => alert(message);
         const showUserError = (error) => alert(error?.message || String(error));
-        const locFromDoc = (d) => ({ neighborhood: d.neighborhood, il: d.il || d.city, ilce: d.ilce || d.district });
+        const locFromDoc = (d) => ({ neighborhood: d?.neighborhood, il: d?.il || d?.city, ilce: d?.ilce || d?.district });
         const normLoc = (s) => (s || '').trim().toLocaleLowerCase('tr-TR');
+        const locLabel = (s, fallback = '') => (s || fallback).trim().toUpperCase();
         const reportMatchesLoc = (report, il, ilce) =>
             normLoc(report.il || report.city) === normLoc(il) &&
             normLoc(report.ilce || report.district) === normLoc(ilce);
-        const formatFullLoc = ({ neighborhood, ilce, il }) => `${neighborhood}, ${ilce}, ${il}`;
+        const formatFullLoc = ({ neighborhood, ilce, il }) => {
+            const parts = [neighborhood, ilce, il].filter(p => p && String(p).trim());
+            return parts.length ? parts.join(', ') : 'Konum atanmadı';
+        };
+
+        async function ensureUserLocationFields(uid, ud) {
+            const loc = locFromDoc(ud);
+            if (loc.neighborhood && loc.il && loc.ilce) return ud;
+            const q = query(collection(db, "reports"), where("uid", "==", uid));
+            const qs = await getDocs(q);
+            const sample = qs.docs.map(d => d.data()).find(r => r.neighborhood && (r.il || r.city) && (r.ilce || r.district));
+            if (!sample) return ud;
+            const patch = {
+                neighborhood: ud.neighborhood || sample.neighborhood,
+                il: loc.il || sample.il || sample.city,
+                ilce: loc.ilce || sample.ilce || sample.district,
+                city: ud.city || sample.city || sample.il,
+                district: ud.district || sample.district || sample.ilce
+            };
+            try { await updateDoc(doc(db, "users", uid), patch); } catch (e) { /* kayıt tamamlanırken harita açılabilsin */ }
+            return { ...ud, ...patch };
+        }
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
         const projectLabel = (t) => messages[t]?.title || t;
 
@@ -350,12 +372,20 @@
         }
 
         async function loadNeighborhoodReports(ud) {
-            const { il, ilce } = locFromDoc(ud);
+            let { il, ilce } = locFromDoc(ud);
             const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood));
             const qs = await getDocs(q);
-            const reports = qs.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter(r => reportMatchesLoc(r, il, ilce));
+            const allInNeighborhood = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (!il || !ilce) {
+                const sample = allInNeighborhood.find(r => (r.il || r.city) && (r.ilce || r.district));
+                if (sample) {
+                    il = il || sample.il || sample.city;
+                    ilce = ilce || sample.ilce || sample.district;
+                }
+            }
+            const reports = (il && ilce)
+                ? allInNeighborhood.filter(r => reportMatchesLoc(r, il, ilce))
+                : allInNeighborhood;
             return { reports, il, ilce };
         }
 
@@ -377,10 +407,11 @@
         }
 
         async function paintNeighborhoodMap(ud) {
+            if (auth.currentUser) ud = await ensureUserLocationFields(auth.currentUser.uid, ud);
             const { reports, il, ilce } = await loadNeighborhoodReports(ud);
             cachedMapReports = reports;
             cachedMapUser = ud;
-            document.getElementById('map-location-label').innerText = `${il.toUpperCase()} / ${ilce.toUpperCase()} / ${ud.neighborhood.toUpperCase()} için mahalle sınırı ve canlı sorun haritası.`;
+            document.getElementById('map-location-label').innerText = `${locLabel(il, 'İl')} / ${locLabel(ilce, 'İlçe')} / ${locLabel(ud.neighborhood, 'Mahalle')} için mahalle sınırı ve canlı sorun haritası.`;
             if (!ensureNeighborhoodMap()) return showUserMessage('Harita yüklenemedi. Lütfen sayfayı yenileyin.');
             clearMapLayers();
             try {
@@ -677,8 +708,10 @@
         window.viewNeighborhoodReport = async () => {
             if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             try {
-                const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid)), ud = uSnap.data();
-                if(!ud.neighborhood) return showUserMessage(MSG.NEED_FIRST_REPORT);
+                const uSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
+                let ud = uSnap.data();
+                if(!ud?.neighborhood) return showUserMessage(MSG.NEED_FIRST_REPORT);
+                ud = await ensureUserLocationFields(auth.currentUser.uid, ud);
                 showView('neighborhood-view');
                 await paintNeighborhoodMap(ud);
             } catch (e) { showUserError(e); }
