@@ -405,11 +405,8 @@
             }).length;
         }
 
-        function pickDisplayReport(anchorReport, group) {
-            return anchorReport;
-        }
-
         function buildProblemPoints(reports) {
+            const reportById = new Map(reports.map(r => [r.id, r]));
             const byAnchor = new Map();
             const standalone = [];
             for (const report of reports) {
@@ -421,21 +418,27 @@
                 }
             }
             const points = [];
+            const anchorIdsWithChildren = new Set(byAnchor.keys());
             for (const [anchorId, group] of byAnchor) {
-                const anchorReport = group.find(r => r.id === anchorId) || group[0];
-                const reporters = new Set(group.map(r => r.uid));
+                const anchorReport = reportById.get(anchorId) || group.find(r => r.id === anchorId) || group[0];
+                const fullGroup = reportById.has(anchorId)
+                    ? [reportById.get(anchorId), ...group.filter(r => r.id !== anchorId)]
+                    : group;
+                const reporters = new Set(fullGroup.map(r => r.uid));
                 points.push({
                     lat: anchorReport.lat, lng: anchorReport.lng, type: anchorReport.type, anchorId, anchorReport,
-                    reporters, reports: group, reporterCount: reporters.size,
-                    mainReport: pickDisplayReport(anchorReport, group)
+                    reporters, reports: fullGroup, reporterCount: reporters.size, mainReport: anchorReport
                 });
             }
             for (const report of standalone) {
+                if (anchorIdsWithChildren.has(report.id)) continue;
                 let matched = points.find(pt => pt.type === report.type && distanceMeters(pt.lat, pt.lng, report.lat, report.lng) <= DUPLICATE_RADIUS_METERS);
                 if (matched) {
-                    matched.reporters.add(report.uid);
-                    matched.reports.push(report);
-                    matched.reporterCount = matched.reporters.size;
+                    if (!matched.reports.some(r => r.id === report.id)) {
+                        matched.reports.push(report);
+                        matched.reporters.add(report.uid);
+                        matched.reporterCount = matched.reporters.size;
+                    }
                 } else {
                     points.push({
                         lat: report.lat, lng: report.lng, type: report.type, anchorId: report.id, anchorReport: report,
