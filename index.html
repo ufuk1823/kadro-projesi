@@ -82,6 +82,9 @@
             width: 100%;
         }
         .feedback-scrim { z-index: 5000; }
+        .moderation-card { background: #fff; border: 1px solid #f3f4f6; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .moderation-card-anchor { background: #fafafa; border-radius: 12px; padding: 10px; margin-top: 10px; font-size: 11px; color: #6b7280; }
+        .moderation-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 12px; background: #f3f4f6; flex-shrink: 0; }
     </style>
 </head>
 <body>
@@ -178,7 +181,19 @@
                 <button onclick="changeNeighborhood()" class="text-[10px] font-bold text-[#B71C1C] underline uppercase mt-2">Adres Değiştir</button>
             </div>
             <button onclick="logout()" class="mt-12 text-[10px] font-black text-red-600 underline uppercase opacity-50">Sistemden Güvenli Çıkış</button>
+            <button type="button" id="moderator-panel-btn" class="hidden mt-6 w-full bg-gray-900 text-white py-4 rounded-xl font-black uppercase text-xs tracking-widest" onclick="viewModerationPanel()">Moderasyon Paneli</button>
         </div>
+    </div>
+
+    <!-- 5b. MODERASYON (yalnızca moderatör) -->
+    <div id="moderation-view" class="view-section max-w-4xl mx-auto p-6 mt-4">
+        <button type="button" onclick="showView('user-panel')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> PROFİLE DÖN</button>
+        <div class="mb-6">
+            <h2 class="text-xl font-black uppercase tracking-tighter text-[#2D2D2D]">Moderasyon — Yedek Bildirimler</h2>
+            <p class="text-xs font-bold text-gray-500 mt-2 leading-relaxed">Aynı sorun noktasına 2. ve 3. sırada yüklenen fotoğraf ve notlar burada listelenir. Ortak raporda yalnızca ilk bildirenin içeriği görünür.</p>
+        </div>
+        <div id="moderation-empty" class="hidden bg-white p-10 rounded-2xl text-center border-2 border-dashed border-gray-200 text-gray-400 font-bold italic">Henüz yedek bildirim yok.</div>
+        <div id="moderation-backup-list" class="space-y-4"></div>
     </div>
 
     <!-- 6. GÜNDEMLER -->
@@ -232,6 +247,7 @@
             VIEW_REPORT_LOCATION: 'Mahalle raporunuzu görüntülemek için konumunuzu açın.',
             MODERATOR_ONLY: 'Bu işlem yalnızca moderatör içindir.',
             POINT_DELETED: 'Sorun noktası silindi.',
+            BACKUP_DELETED: 'Yedek bildirim silindi.',
             neighborhoodMismatch: (name) => `Sadece kayıtlı olduğunuz ${name} mahallesinde bildirim yapabilirsiniz.`,
             neighborhoodChangeWait: (date) => `Mahalle kaydınızı son 30 gün içinde güncellediniz. Bir sonraki değişiklik için lütfen ${date} tarihini bekleyiniz.`,
             neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
@@ -277,6 +293,78 @@
             return auth.currentUser?.email?.toLowerCase() === MODERATOR_EMAIL.toLowerCase();
         }
 
+        function updateModeratorUi() {
+            const btn = document.getElementById('moderator-panel-btn');
+            if (btn) btn.classList.toggle('hidden', !isModerator());
+        }
+
+        function escapeHtml(text) {
+            return String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function formatReportDate(report) {
+            const d = report.createdAt?.toDate?.();
+            if (!d) return 'Tarih yok';
+            return d.toLocaleString('tr-TR', { timeZone: ISTANBUL_TZ, dateStyle: 'short', timeStyle: 'short' });
+        }
+
+        function isModeratorBackupReport(report) {
+            if (!report.photo || report.kind === 'support') return false;
+            if (report.kind === 'backup') return true;
+            return Boolean(report.anchorId);
+        }
+
+        function renderModerationBackups(backups, anchorById) {
+            const list = document.getElementById('moderation-backup-list');
+            const empty = document.getElementById('moderation-empty');
+            list.innerHTML = '';
+            if (!backups.length) {
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+            backups.forEach(r => {
+                const anchor = anchorById.get(r.anchorId);
+                const locStr = formatFullLoc({ neighborhood: r.neighborhood, ilce: r.ilce || r.district, il: r.il || r.city });
+                list.innerHTML += `<article class="moderation-card"><div class="flex gap-4"><img src="${r.photo || ''}" alt="" class="moderation-thumb" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${escapeHtml(projectLabel(r.type))}</p><p class="text-xs text-gray-600 mt-1">${escapeHtml(r.note || 'Not yok.')}</p><p class="text-[10px] font-bold text-gray-400 mt-2 uppercase">${escapeHtml(r.userNick || 'Üye')} · ${escapeHtml(locStr)}</p><p class="text-[10px] text-gray-400 mt-1">${formatReportDate(r)}</p><div class="moderation-card-anchor"><strong class="text-gray-600">Ortak raporda görünen (1. bildiren):</strong> ${escapeHtml(anchor?.note || 'Not yok.')} · ${escapeHtml(anchor?.userNick || '—')}</div><button type="button" class="btn-moderator-delete mt-3" onclick="moderatorDeleteBackup('${r.id}')">Yedeği Sil</button></div></div></article>`;
+            });
+        }
+
+        async function loadModerationPanel() {
+            const qs = await getDocs(collection(db, "reports"));
+            const all = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+            const anchorById = new Map(all.filter(r => !r.anchorId).map(r => [r.id, r]));
+            for (const r of all) {
+                if (r.anchorId && !anchorById.has(r.anchorId)) {
+                    const anchor = all.find(a => a.id === r.anchorId);
+                    if (anchor) anchorById.set(r.anchorId, anchor);
+                }
+            }
+            const backups = all
+                .filter(isModeratorBackupReport)
+                .sort((a, b) => (b.createdAt?.toDate?.()?.getTime?.() || 0) - (a.createdAt?.toDate?.()?.getTime?.() || 0));
+            renderModerationBackups(backups, anchorById);
+        }
+
+        window.viewModerationPanel = async () => {
+            if (!isModerator()) return showUserMessage(MSG.MODERATOR_ONLY);
+            try {
+                showView('moderation-view');
+                await loadModerationPanel();
+            } catch (e) { showUserError(e); }
+        };
+
+        window.moderatorDeleteBackup = async (reportId) => {
+            if (!isModerator()) return showUserMessage(MSG.MODERATOR_ONLY);
+            if (!confirm('Bu yedek bildirimi silmek istediğinize emin misiniz?')) return;
+            try {
+                await deleteDoc(doc(db, "reports", reportId));
+                showUserMessage(MSG.BACKUP_DELETED);
+                await loadModerationPanel();
+                if (cachedMapUser) await paintNeighborhoodMap(cachedMapUser);
+            } catch (e) { showUserError(e); }
+        };
+
         function distanceMeters(lat1, lng1, lat2, lng2) {
             const R = 6371000, toRad = d => d * Math.PI / 180;
             const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
@@ -317,6 +405,10 @@
             }).length;
         }
 
+        function pickDisplayReport(anchorReport, group) {
+            return anchorReport;
+        }
+
         function buildProblemPoints(reports) {
             const byAnchor = new Map();
             const standalone = [];
@@ -335,7 +427,7 @@
                 points.push({
                     lat: anchorReport.lat, lng: anchorReport.lng, type: anchorReport.type, anchorId, anchorReport,
                     reporters, reports: group, reporterCount: reporters.size,
-                    mainReport: group.find(r => r.photo) || anchorReport
+                    mainReport: pickDisplayReport(anchorReport, group)
                 });
             }
             for (const report of standalone) {
@@ -344,7 +436,6 @@
                     matched.reporters.add(report.uid);
                     matched.reports.push(report);
                     matched.reporterCount = matched.reporters.size;
-                    if (report.photo && !matched.mainReport.photo) matched.mainReport = report;
                 } else {
                     points.push({
                         lat: report.lat, lng: report.lng, type: report.type, anchorId: report.id, anchorReport: report,
@@ -559,7 +650,11 @@
                 document.getElementById('display-full-loc').innerText = fullLocStr.toUpperCase();
                 document.getElementById('panel-neighborhood').innerText = fullLocStr;
                 document.getElementById('login-btn').classList.add('hidden'); document.getElementById('user-info').classList.remove('hidden');
-            } else { document.getElementById('login-btn').classList.remove('hidden'); document.getElementById('user-info').classList.add('hidden'); }
+                updateModeratorUi();
+            } else {
+                document.getElementById('login-btn').classList.remove('hidden'); document.getElementById('user-info').classList.add('hidden');
+                updateModeratorUi();
+            }
         });
 
         window.login = () => signInWithPopup(auth, provider);
@@ -710,7 +805,7 @@
                 const savedLoc = { neighborhood: draft.neighborhood, ilce: draft.ilce, il: draft.il };
                 if (anchor) {
                     await addDoc(collection(db, "reports"), {
-                        type: currentProject, photo: photoToSave, kind: 'photo', anchorId: anchor.id,
+                        type: currentProject, photo: photoToSave, kind: 'backup', anchorId: anchor.id,
                         lat: anchor.lat, lng: anchor.lng, neighborhood: savedLoc.neighborhood, il: savedLoc.il, ilce: savedLoc.ilce,
                         city: savedLoc.il, district: savedLoc.ilce, note, uid: auth.currentUser.uid, userNick: ud.nickname, createdAt: serverTimestamp()
                     });
