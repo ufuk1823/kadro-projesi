@@ -732,6 +732,11 @@
             draft.photo = null;
         }
 
+        function exitPreviewToProject() {
+            resetDraftForm();
+            showView('project-detail');
+        }
+
         function schedulePhotoSuccessAutoClose() {
             clearFeedbackTimers();
             feedbackCloseTimer = setTimeout(closePhotoSuccessModal, SUPPORT_SUCCESS_DISPLAY_MS + FEEDBACK_CLOSE_DELAY_MS);
@@ -760,7 +765,7 @@
             clearFeedbackTimers();
             pendingPointFullAnchorId = null;
             document.getElementById('point-full-scrim').style.display = 'none';
-            resetDraftForm();
+            exitPreviewToProject();
         };
 
         window.closePointFullModalDelayed = () => {
@@ -784,14 +789,20 @@
             if (!auth.currentUser) return showUserMessage(MSG.AUTH_REQUIRED);
             const uRef = doc(db, "users", auth.currentUser.uid), uSnap = await getDoc(uRef), ud = uSnap.data();
             if(!ud.neighborhood) await updateDoc(uRef, { neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il, district: draft.ilce, lastNeighChange: serverTimestamp() });
-            else if(ud.neighborhood !== draft.neighborhood) return showUserMessage(MSG.neighborhoodMismatch(ud.neighborhood));
+            else if(ud.neighborhood !== draft.neighborhood) {
+                exitPreviewToProject();
+                return showUserMessage(MSG.neighborhoodMismatch(ud.neighborhood));
+            }
             try {
                 const { reports } = await loadNeighborhoodReports({ neighborhood: draft.neighborhood, il: draft.il, ilce: draft.ilce, city: draft.il });
                 const anchor = findNearbyAnchor(reports, currentProject, draft.lat, draft.lng);
                 const note = document.getElementById('report-note').value.trim();
                 let photoToSave;
                 if (anchor) {
-                    if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) return showUserMessage(MSG.ALREADY_REPORTED);
+                    if (userAlreadyAtPoint(reports, anchor.id, auth.currentUser.uid)) {
+                        exitPreviewToProject();
+                        return showUserMessage(MSG.ALREADY_REPORTED);
+                    }
                     const photoCount = countPhotosAtPoint(reports, anchor.id);
                     if (photoCount >= MAX_PHOTOS_PER_POINT) {
                         showPointFullModal(anchor.id);
@@ -803,7 +814,10 @@
                 }
                 if (photoToSave) {
                     const dailyPhotos = await countUserPhotosToday(auth.currentUser.uid);
-                    if (dailyPhotos >= USER_DAILY_PHOTO_LIMIT) return showUserMessage(MSG.DAILY_PHOTO_LIMIT);
+                    if (dailyPhotos >= USER_DAILY_PHOTO_LIMIT) {
+                        exitPreviewToProject();
+                        return showUserMessage(MSG.DAILY_PHOTO_LIMIT);
+                    }
                 }
                 const savedLoc = { neighborhood: draft.neighborhood, ilce: draft.ilce, il: draft.il };
                 if (anchor) {
