@@ -88,9 +88,10 @@
         .map-category-picker {
             position: relative;
             z-index: 600;
-            margin-top: 12px;
-            max-width: 320px;
+            width: 100%;
+            max-width: 100%;
             height: 44px;
+            margin-bottom: 4px;
         }
         .map-category-panel {
             position: absolute;
@@ -121,8 +122,14 @@
             font-size: 10px;
             font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.03em;
             cursor: pointer;
+        }
+        #map-category-trigger-label {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
         }
         .map-category-chevron {
             width: 14px;
@@ -147,9 +154,10 @@
             font-size: 10px;
             font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.03em;
             cursor: pointer;
             text-align: left;
+            white-space: nowrap;
         }
         button.map-category-option.is-selected {
             background: #fef2f2;
@@ -227,17 +235,17 @@
             <div class="min-w-0 flex-1">
                 <h2 class="text-xl font-black uppercase tracking-tighter text-[#2D2D2D]">Mahalle Sınırı ve Canlı Sorun Haritası</h2>
                 <p id="map-location-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-1">...</p>
-                <div class="map-category-picker" id="map-category-picker">
-                    <div class="map-category-panel">
-                        <button type="button" id="map-category-trigger" class="map-category-trigger" onclick="toggleMapCategoryMenu()" aria-expanded="false" aria-haspopup="listbox">
-                            <span id="map-category-trigger-label">Bozuk Yollar</span>
-                            <svg class="map-category-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-                        </button>
-                        <div id="map-category-menu" class="map-category-menu" role="listbox" aria-label="Sorun kategorisi"></div>
-                    </div>
-                </div>
             </div>
             <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50 shrink-0">Haritayı Ortala</button>
+        </div>
+        <div class="map-category-picker" id="map-category-picker">
+            <div class="map-category-panel">
+                <button type="button" id="map-category-trigger" class="map-category-trigger" onclick="toggleMapCategoryMenu()" aria-expanded="false" aria-haspopup="listbox">
+                    <span id="map-category-trigger-label">Bozuk Yollar</span>
+                    <svg class="map-category-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div id="map-category-menu" class="map-category-menu" role="listbox" aria-label="Sorun kategorisi"></div>
+            </div>
         </div>
         <div id="neighborhood-map"></div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
