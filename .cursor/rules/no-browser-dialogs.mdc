@@ -1,0 +1,25 @@
+---
+description: Kadro UI — tarayıcı alert/confirm/prompt kullanma; özel modal kullan
+alwaysApply: true
+---
+
+# UI Bildirimleri — Tarayıcı Penceresi Yok
+
+KADRO.ORG projesinde kullanıcıya gösterilen **tüm** bilgi, uyarı ve onay mesajları site içi modal/scrim ile yapılır.
+
+## Yasak
+
+- `alert()`
+- `confirm()`
+- `prompt()`
+
+## Kullan
+
+| Amaç | Mekanizma |
+|------|-----------|
+| Bilgi / uyarı / hata | `showNoticeModal()` / `showUserMessage()` / `showUserError()` |
+| Başarı (fotoğraf kaydı vb.) | `showPhotoSuccessModal()` |
+| Onay (silme vb.) | `showUserConfirm()` + `confirm-scrim` |
+| İki seçenekli karar | Mevcut özel scrim kalıpları (`point-full-scrim`, `profile-required-scrim` vb.) |
+
+Yeni mesaj eklerken tarayıcı diyaloglarına dönme.
