@@ -85,6 +85,28 @@
         .moderation-card { background: #fff; border: 1px solid #f3f4f6; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .moderation-card-anchor { background: #fafafa; border-radius: 12px; padding: 10px; margin-top: 10px; font-size: 11px; color: #6b7280; }
         .moderation-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 12px; background: #f3f4f6; flex-shrink: 0; }
+        .map-category-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        button.map-category-tab {
+            flex: 1 1 0;
+            min-width: 100px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 2px solid #e5e7eb;
+            background: #fff;
+            color: #6b7280;
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        button.map-category-tab.active {
+            border-color: var(--kadro-red);
+            background: #fef2f2;
+            color: var(--kadro-red);
+        }
     </style>
 </head>
 <body>
@@ -152,11 +174,16 @@
     <div id="neighborhood-view" class="view-section max-w-4xl mx-auto p-6 mt-4">
         <button onclick="showView('project-detail')" class="mb-6 text-gray-400 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> GERİ</button>
         <div class="flex flex-wrap items-start justify-between gap-4 mb-2">
-            <div>
+            <div class="min-w-0 flex-1">
                 <h2 class="text-xl font-black uppercase tracking-tighter text-[#2D2D2D]">Mahalle Sınırı ve Canlı Sorun Haritası</h2>
                 <p id="map-location-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-1">...</p>
+                <div class="map-category-tabs" id="map-category-tabs" role="tablist" aria-label="Sorun kategorisi">
+                    <button type="button" class="map-category-tab" data-type="bozuk-yollar" onclick="selectMapCategory('bozuk-yollar')">Bozuk Yollar</button>
+                    <button type="button" class="map-category-tab" data-type="temizlik" onclick="selectMapCategory('temizlik')">Çevresel Temizlik</button>
+                    <button type="button" class="map-category-tab" data-type="aksakliklar" onclick="selectMapCategory('aksakliklar')">Genel Aksaklıklar</button>
+                </div>
             </div>
-            <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50">Haritayı Ortala</button>
+            <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50 shrink-0">Haritayı Ortala</button>
         </div>
         <div id="neighborhood-map"></div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
@@ -223,7 +250,7 @@
         const firebaseConfig = { apiKey: "AIzaSyAPYVDL5o8PZMxNCHlulRktClrc74U0CEA", authDomain: "kadro-org.firebaseapp.com", projectId: "kadro-org", storageBucket: "kadro-org.firebasestorage.app", messagingSenderId: "976664604968", appId: "1:976664604968:web:733c514283d69848bea01d" };
         const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app), provider = new GoogleAuthProvider();
 
-        let currentProject = "", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, pendingPointFullAnchorId = null, feedbackCloseTimer = null, pendingConfirmResolve = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
+        let currentProject = "", selectedMapCategory = "bozuk-yollar", camStream = null, leafletMap = null, currentMapLayers = [], mapCenterCoords = null, cachedMapReports = [], cachedMapUser = null, cachedMapLoc = null, pendingPointFullAnchorId = null, feedbackCloseTimer = null, pendingConfirmResolve = null, draft = { photo: null, lat: null, lng: null, neighborhood: null, il: null, ilce: null };
         const streetNameCache = new Map(), streetNamePending = new Map();
         const DUPLICATE_RADIUS_METERS = 15, MIN_R = 15, MAX_R = 70, HEAT_CAP = 100;
         const PHOTO_MAX_WIDTH = 1024, MAX_PHOTOS_PER_POINT = 3, PHOTO_JPEG_QUALITY = 0.8;
@@ -323,6 +350,7 @@
             return Boolean(ud?.neighborhood?.trim());
         }
         const messages = { 'bozuk-yollar': { title: 'Bozuk Yollar', desc: 'Mahallenizde bakım ve onarım gerektiren yolları bildirebilirsiniz.', p: 'Örn: Asfalt çökmesi...' }, 'temizlik': { title: 'Çevresel Temizlik', desc: 'Mahallenizde çöp konteyneri konulmasını istediğiniz noktaları bildirebilirsiniz.', p: 'Örn: Buraya konteyner gerekiyor...' }, 'aksakliklar': { title: 'Genel Aksaklıklar', desc: 'Kırık banklar, çalışmayan sokak lambaları, hasarlı kaldırımlar vb.', p: 'Örn: Sokak lambası yanmıyor...' } };
+        const PROJECT_TYPES = ['bozuk-yollar', 'temizlik', 'aksakliklar'];
         const projectLabel = (t) => messages[t]?.title || t;
 
         function isModerator() {
@@ -547,6 +575,52 @@
             renderReportsList(points);
         }
 
+        function filterPointsByCategory(reports, category) {
+            return groupReportsIntoPoints(reports).filter(pt => pt.type === category);
+        }
+
+        function updateCategoryTabs() {
+            document.querySelectorAll('.map-category-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.type === selectedMapCategory);
+            });
+        }
+
+        function updateMapLocationLabel() {
+            if (!cachedMapUser || !cachedMapLoc) return;
+            const { il, ilce } = cachedMapLoc;
+            document.getElementById('map-location-label').innerText = `${locLabel(il, 'İl')} / ${locLabel(ilce, 'İlçe')} / ${locLabel(cachedMapUser.neighborhood, 'Mahalle')} · ${projectLabel(selectedMapCategory)}`;
+        }
+
+        function applyMapCategoryFilter() {
+            updateCategoryTabs();
+            const noReportsEl = document.getElementById('no-reports-msg');
+            if (!cachedMapReports.length) {
+                noReportsEl.innerText = 'Henüz bu mahallede bir bildirim yapılmadı.';
+                noReportsEl.classList.remove('hidden');
+                document.getElementById('reports-list').innerHTML = '';
+                clearMapLayers();
+                return;
+            }
+            const points = filterPointsByCategory(cachedMapReports, selectedMapCategory);
+            if (!points.length) {
+                noReportsEl.innerText = `${projectLabel(selectedMapCategory)} kategorisinde henüz bildirim yok.`;
+                noReportsEl.classList.remove('hidden');
+                document.getElementById('reports-list').innerHTML = '';
+                clearMapLayers();
+                return;
+            }
+            noReportsEl.classList.add('hidden');
+            refreshHeatLayers(points);
+        }
+
+        window.selectMapCategory = (type) => {
+            if (!PROJECT_TYPES.includes(type) || type === selectedMapCategory) return;
+            selectedMapCategory = type;
+            updateMapLocationLabel();
+            applyMapCategoryFilter();
+            refreshMapSize();
+        };
+
         async function loadNeighborhoodReports(ud) {
             let { il, ilce } = locFromDoc(ud);
             const q = query(collection(db, "reports"), where("neighborhood", "==", ud.neighborhood));
@@ -582,14 +656,16 @@
             });
         }
 
-        async function paintNeighborhoodMap(ud) {
+        async function paintNeighborhoodMap(ud, category) {
             if (auth.currentUser && userHasRegisteredAddress(ud)) {
                 ud = await ensureUserLocationFields(auth.currentUser.uid, ud);
             }
             const { reports, il, ilce } = await loadNeighborhoodReports(ud);
             cachedMapReports = reports;
             cachedMapUser = ud;
-            document.getElementById('map-location-label').innerText = `${locLabel(il, 'İl')} / ${locLabel(ilce, 'İlçe')} / ${locLabel(ud.neighborhood, 'Mahalle')} için mahalle sınırı ve canlı sorun haritası.`;
+            cachedMapLoc = { il, ilce };
+            if (category && PROJECT_TYPES.includes(category)) selectedMapCategory = category;
+            updateMapLocationLabel();
             if (!ensureNeighborhoodMap()) return showUserMessage('Harita yüklenemedi. Lütfen sayfayı yenileyin.');
             clearMapLayers();
             try {
@@ -604,13 +680,7 @@
                     leafletMap.setView(mapCenterCoords, 16);
                 }
             } catch (e) {}
-            if (reports.length === 0) {
-                document.getElementById('no-reports-msg').classList.remove('hidden');
-                document.getElementById('reports-list').innerHTML = '';
-            } else {
-                document.getElementById('no-reports-msg').classList.add('hidden');
-                refreshHeatLayers(groupReportsIntoPoints(reports));
-            }
+            applyMapCategoryFilter();
             refreshMapSize();
         }
 
@@ -940,7 +1010,7 @@
         async function openNeighborhoodReportForLocation(loc) {
             const locDoc = { neighborhood: loc.neighborhood, il: loc.il, ilce: loc.ilce, city: loc.il, district: loc.ilce };
             showView('neighborhood-view');
-            await paintNeighborhoodMap(locDoc);
+            await paintNeighborhoodMap(locDoc, selectedMapCategory);
         }
 
         window.requestNeighborhoodLocation = () => {
@@ -968,7 +1038,7 @@
                 }
                 const enriched = await ensureUserLocationFields(auth.currentUser.uid, ud);
                 showView('neighborhood-view');
-                await paintNeighborhoodMap(enriched);
+                await paintNeighborhoodMap(enriched, currentProject || PROJECT_TYPES[0]);
             } catch (e) { showUserError(e); }
         };
 
