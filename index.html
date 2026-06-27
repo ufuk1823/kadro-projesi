@@ -88,10 +88,24 @@
         .map-category-picker {
             position: relative;
             z-index: 600;
-            width: 100%;
+            display: inline-block;
             max-width: 100%;
-            height: 44px;
             margin-bottom: 4px;
+            vertical-align: top;
+        }
+        .map-category-width-hold {
+            display: block;
+            visibility: hidden;
+            height: 44px;
+            box-sizing: border-box;
+            padding: 10px 38px 10px 14px;
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            line-height: 24px;
+            white-space: nowrap;
         }
         .map-category-panel {
             position: absolute;
@@ -127,9 +141,6 @@
         }
         #map-category-trigger-label {
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            min-width: 0;
         }
         .map-category-chevron {
             width: 14px;
@@ -239,6 +250,7 @@
             <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50 shrink-0">Haritayı Ortala</button>
         </div>
         <div class="map-category-picker" id="map-category-picker">
+            <span class="map-category-width-hold" id="map-category-width-hold" aria-hidden="true">Bozuk Yollar</span>
             <div class="map-category-panel">
                 <button type="button" id="map-category-trigger" class="map-category-trigger" onclick="toggleMapCategoryMenu()" aria-expanded="false" aria-haspopup="listbox">
                     <span id="map-category-trigger-label">Bozuk Yollar</span>
@@ -641,16 +653,26 @@
             return groupReportsIntoPoints(reports).filter(pt => pt.type === category);
         }
 
+        function longestCategoryLabel() {
+            return PROJECT_TYPES.map(t => projectLabel(t)).reduce((a, b) => a.length > b.length ? a : b);
+        }
+
+        function setMapCategoryWidthHold(text) {
+            document.getElementById('map-category-width-hold').textContent = text;
+        }
+
         function renderMapCategoryMenu() {
             const menu = document.getElementById('map-category-menu');
             menu.innerHTML = PROJECT_TYPES.map(t =>
                 `<button type="button" class="map-category-option${t === selectedMapCategory ? ' is-selected' : ''}" data-type="${t}" onclick="selectMapCategory('${t}')">${projectLabel(t)}</button>`
             ).join('');
+            setMapCategoryWidthHold(longestCategoryLabel());
         }
 
         function closeMapCategoryMenu() {
             document.getElementById('map-category-picker').classList.remove('is-open');
             document.getElementById('map-category-trigger').setAttribute('aria-expanded', 'false');
+            setMapCategoryWidthHold(projectLabel(selectedMapCategory));
             document.removeEventListener('pointerdown', onMapCategoryOutsideClick);
         }
 
@@ -674,7 +696,9 @@
         };
 
         function updateCategoryTabs() {
-            document.getElementById('map-category-trigger-label').innerText = projectLabel(selectedMapCategory);
+            const label = projectLabel(selectedMapCategory);
+            document.getElementById('map-category-trigger-label').innerText = label;
+            setMapCategoryWidthHold(label);
             closeMapCategoryMenu();
         }
 
