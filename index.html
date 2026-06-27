@@ -85,7 +85,27 @@
         .moderation-card { background: #fff; border: 1px solid #f3f4f6; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .moderation-card-anchor { background: #fafafa; border-radius: 12px; padding: 10px; margin-top: 10px; font-size: 11px; color: #6b7280; }
         .moderation-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 12px; background: #f3f4f6; flex-shrink: 0; }
-        .map-category-picker { position: relative; margin-top: 12px; max-width: 320px; }
+        .map-category-picker {
+            position: relative;
+            z-index: 600;
+            margin-top: 12px;
+            max-width: 320px;
+            height: 44px;
+        }
+        .map-category-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: #fff;
+            border: 2px solid var(--kadro-red);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        }
+        .map-category-picker.is-open .map-category-panel {
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+        }
         button.map-category-trigger {
             width: 100%;
             display: flex;
@@ -93,8 +113,8 @@
             justify-content: space-between;
             gap: 10px;
             padding: 10px 14px;
-            border-radius: 12px;
-            border: 2px solid var(--kadro-red);
+            border: none;
+            border-radius: 0;
             background: #fef2f2;
             color: var(--kadro-red);
             font-family: inherit;
@@ -111,18 +131,16 @@
             transition: transform 0.15s ease;
         }
         .map-category-picker.is-open .map-category-chevron { transform: rotate(180deg); }
-        .map-category-menu {
-            display: none;
-            flex-direction: column;
-            gap: 6px;
-            margin-top: 6px;
-        }
-        .map-category-picker.is-open .map-category-menu { display: flex; }
+        .map-category-menu { display: none; }
+        .map-category-picker.is-open .map-category-menu { display: block; }
+        .map-category-picker.is-open .map-category-trigger { display: none; }
         button.map-category-option {
             width: 100%;
-            padding: 10px 14px;
-            border-radius: 12px;
-            border: 2px solid #e5e7eb;
+            display: block;
+            padding: 11px 14px;
+            border: none;
+            border-top: 1px solid #fee2e2;
+            border-radius: 0;
             background: #fff;
             color: #6b7280;
             font-family: inherit;
@@ -132,9 +150,13 @@
             letter-spacing: 0.04em;
             cursor: pointer;
             text-align: left;
-            transition: border-color 0.15s, color 0.15s, background 0.15s;
         }
-        button.map-category-option:active { background: #f9fafb; }
+        button.map-category-option.is-selected {
+            background: #fef2f2;
+            color: var(--kadro-red);
+        }
+        button.map-category-option:first-child { border-top: none; }
+        button.map-category-option:not(.is-selected):active { background: #f9fafb; }
     </style>
 </head>
 <body>
@@ -206,11 +228,13 @@
                 <h2 class="text-xl font-black uppercase tracking-tighter text-[#2D2D2D]">Mahalle Sınırı ve Canlı Sorun Haritası</h2>
                 <p id="map-location-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-1">...</p>
                 <div class="map-category-picker" id="map-category-picker">
-                    <button type="button" id="map-category-trigger" class="map-category-trigger" onclick="toggleMapCategoryMenu()" aria-expanded="false" aria-haspopup="listbox">
-                        <span id="map-category-trigger-label">Bozuk Yollar</span>
-                        <svg class="map-category-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div id="map-category-menu" class="map-category-menu" role="listbox" aria-label="Diğer kategoriler"></div>
+                    <div class="map-category-panel">
+                        <button type="button" id="map-category-trigger" class="map-category-trigger" onclick="toggleMapCategoryMenu()" aria-expanded="false" aria-haspopup="listbox">
+                            <span id="map-category-trigger-label">Bozuk Yollar</span>
+                            <svg class="map-category-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                        <div id="map-category-menu" class="map-category-menu" role="listbox" aria-label="Sorun kategorisi"></div>
+                    </div>
                 </div>
             </div>
             <button onclick="centerNeighborhoodMap()" class="text-xs font-bold uppercase tracking-widest border border-gray-200 bg-white px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50 shrink-0">Haritayı Ortala</button>
@@ -609,24 +633,40 @@
             return groupReportsIntoPoints(reports).filter(pt => pt.type === category);
         }
 
+        function renderMapCategoryMenu() {
+            const menu = document.getElementById('map-category-menu');
+            menu.innerHTML = PROJECT_TYPES.map(t =>
+                `<button type="button" class="map-category-option${t === selectedMapCategory ? ' is-selected' : ''}" data-type="${t}" onclick="selectMapCategory('${t}')">${projectLabel(t)}</button>`
+            ).join('');
+        }
+
         function closeMapCategoryMenu() {
             document.getElementById('map-category-picker').classList.remove('is-open');
             document.getElementById('map-category-trigger').setAttribute('aria-expanded', 'false');
+            document.removeEventListener('pointerdown', onMapCategoryOutsideClick);
+        }
+
+        function onMapCategoryOutsideClick(e) {
+            const picker = document.getElementById('map-category-picker');
+            if (!picker.contains(e.target)) closeMapCategoryMenu();
         }
 
         window.toggleMapCategoryMenu = () => {
             const picker = document.getElementById('map-category-picker');
-            const open = picker.classList.toggle('is-open');
-            document.getElementById('map-category-trigger').setAttribute('aria-expanded', open ? 'true' : 'false');
+            const willOpen = !picker.classList.contains('is-open');
+            if (willOpen) {
+                renderMapCategoryMenu();
+                setTimeout(() => document.addEventListener('pointerdown', onMapCategoryOutsideClick), 0);
+            } else {
+                closeMapCategoryMenu();
+                return;
+            }
+            picker.classList.add('is-open');
+            document.getElementById('map-category-trigger').setAttribute('aria-expanded', 'true');
         };
 
         function updateCategoryTabs() {
             document.getElementById('map-category-trigger-label').innerText = projectLabel(selectedMapCategory);
-            const menu = document.getElementById('map-category-menu');
-            menu.innerHTML = PROJECT_TYPES
-                .filter(t => t !== selectedMapCategory)
-                .map(t => `<button type="button" class="map-category-option" data-type="${t}" onclick="selectMapCategory('${t}')">${projectLabel(t)}</button>`)
-                .join('');
             closeMapCategoryMenu();
         }
 
