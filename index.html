@@ -47,11 +47,12 @@
             display: block;
         }
         button.btn-support-card {
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 10px;
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 11px;
             margin-top: 10px;
-            display: inline-block;
+            display: block;
+            width: 100%;
         }
         button.btn-support:disabled,
         button.btn-support-card:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -70,8 +71,14 @@
             padding: 10px 14px;
             font-size: 10px;
             margin-top: 8px;
-            display: inline-block;
+            display: block;
             width: 100%;
+        }
+        .problem-point-card button.btn-moderator-delete {
+            margin-top: 0;
+            background: transparent;
+            color: #fca5a5;
+            border-color: #fca5a5;
         }
         button.btn-moderator-delete-sm {
             border-radius: 8px;
@@ -81,6 +88,105 @@
             display: block;
             width: 100%;
         }
+        .problem-point-card {
+            background: #1b1d22;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+        }
+        .problem-point-card-photo {
+            width: 100%;
+            height: 190px;
+            object-fit: cover;
+            display: block;
+            background: #23262d;
+        }
+        .problem-point-card-photo.is-hidden { display: none; }
+        .problem-point-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 14px 16px 10px;
+        }
+        .problem-point-card-title {
+            font-family: 'Archivo', 'Inter', sans-serif;
+            font-weight: 900;
+            font-size: 15px;
+            color: #fff;
+            letter-spacing: -0.02em;
+        }
+        .problem-point-card-badge {
+            flex-shrink: 0;
+            background: var(--kadro-green);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 5px 10px;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+        .problem-point-card-details {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 0 12px 12px;
+        }
+        .problem-point-detail-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #23262d;
+            border-radius: 12px;
+            padding: 10px 12px;
+            font-size: 11px;
+            line-height: 1.35;
+            color: #9aa0aa;
+        }
+        .problem-point-detail-icon {
+            width: 18px;
+            text-align: center;
+            flex-shrink: 0;
+            font-size: 13px;
+            line-height: 1;
+        }
+        .problem-point-detail-row strong {
+            color: #fff;
+            font-weight: 700;
+        }
+        .problem-point-card-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 0 12px 14px;
+        }
+        a.problem-point-map-btn,
+        button.problem-point-map-btn {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            background: #fff;
+            color: #111827;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 800;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .problem-point-supported {
+            font-size: 10px;
+            font-weight: 800;
+            color: #86efac;
+            text-transform: uppercase;
+            text-align: center;
+            padding: 4px 0 2px;
+        }
+        .problem-point-card-actions button.btn-support-card { margin-top: 0; }
+        #reports-list { display: flex; flex-direction: column; gap: 16px; }
         .feedback-scrim { z-index: 5000; }
         .moderation-card { background: #fff; border: 1px solid #f3f4f6; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .moderation-card-anchor { background: #fafafa; border-radius: 12px; padding: 10px; margin-top: 10px; font-size: 11px; color: #6b7280; }
@@ -266,7 +372,7 @@
             <div class="heat-legend bg-white border border-gray-100 rounded-xl p-3"><strong>Yoğunluk:</strong> Aynı noktaya artan bildirimler daireyi büyütür; mahallede hangi sorunların daha yoğun raporlandığı görsel olarak okunur.</div>
         </div>
         <div id="no-reports-msg" class="hidden bg-white p-10 rounded-2xl text-center mt-6 border-2 border-dashed border-gray-200 text-gray-400 font-bold italic">Henüz bu mahallede bir bildirim yapılmadı.</div>
-        <div id="reports-list" class="mt-8 space-y-4"></div>
+        <div id="reports-list" class="mt-8"></div>
     </div>
 
     <!-- 5. ÜYE PANELİ -->
@@ -446,6 +552,43 @@
             return d.toLocaleString('tr-TR', { timeZone: ISTANBUL_TZ, dateStyle: 'short', timeStyle: 'short' });
         }
 
+        function formatFirstRecordDate(report) {
+            const d = report.createdAt?.toDate?.();
+            if (!d) return '—';
+            return d.toLocaleDateString('tr-TR', { timeZone: ISTANBUL_TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        function problemPointCardHtml(pt, index, street) {
+            const r = pt.mainReport;
+            const already = auth.currentUser && pt.reporters.has(auth.currentUser.uid);
+            const mahalle = locLabel(r.neighborhood, '—');
+            const ilkKayit = formatFirstRecordDate(r);
+            const countLabel = pt.reporterCount === 1 ? '1 kişi bildirdi' : `${pt.reporterCount} kişi bildirdi`;
+            const mapsUrl = `https://www.google.com/maps?q=${pt.lat},${pt.lng}`;
+            const photoClass = r.photo ? 'problem-point-card-photo' : 'problem-point-card-photo is-hidden';
+            const photoSrc = r.photo || '';
+            const supportBlock = already
+                ? '<p class="problem-point-supported">✓ Bildirdiniz</p>'
+                : supportButtonHtml(pt.anchorId, false);
+            return `<article class="problem-point-card" id="point-card-${pt.anchorId}">
+                <img src="${photoSrc}" alt="" class="${photoClass}" onerror="this.classList.add('is-hidden')">
+                <div class="problem-point-card-head">
+                    <h3 class="problem-point-card-title">${index}. Sorun Noktası</h3>
+                    <span class="problem-point-card-badge" id="count-${pt.anchorId}">${escapeHtml(countLabel)}</span>
+                </div>
+                <div class="problem-point-card-details">
+                    <div class="problem-point-detail-row"><span class="problem-point-detail-icon">📍</span><span>Mahalle: <strong>${escapeHtml(mahalle)}</strong></span></div>
+                    <div class="problem-point-detail-row"><span class="problem-point-detail-icon">🛣️</span><span>Sokak/Yer: <strong>${escapeHtml(street)}</strong></span></div>
+                    <div class="problem-point-detail-row"><span class="problem-point-detail-icon">🕐</span><span>İlk kayıt: <strong>${escapeHtml(ilkKayit)}</strong></span></div>
+                </div>
+                <div class="problem-point-card-actions">
+                    <a class="problem-point-map-btn" href="${mapsUrl}" target="_blank" rel="noopener">Haritada Aç</a>
+                    ${supportBlock}
+                    ${moderatorDeleteButtonHtml(pt.anchorId, false)}
+                </div>
+            </article>`;
+        }
+
         function isModeratorBackupReport(report) {
             if (!report.photo || report.kind === 'support') return false;
             if (report.kind === 'backup') return true;
@@ -615,14 +758,15 @@
             return `<button type="button" class="${cls}" onclick="moderatorDeletePoint('${anchorId}')">Noktayı Sil</button>`;
         }
 
-        function renderReportsList(points) {
+        async function renderReportsList(points) {
             const list = document.getElementById('reports-list');
             list.innerHTML = '';
-            points.sort((a, b) => b.reporterCount - a.reporterCount).forEach(pt => {
-                const r = pt.mainReport;
-                const already = auth.currentUser && pt.reporters.has(auth.currentUser.uid);
-                list.innerHTML += `<div class="bg-white p-4 rounded-2xl shadow-sm flex gap-4 border border-gray-50"><img src="${r.photo || ''}" class="w-20 h-20 object-cover rounded-xl shrink-0 bg-gray-100" onerror="this.style.display='none'"><div class="min-w-0 flex-1"><p class="font-black text-xs uppercase text-[#B71C1C]">${projectLabel(r.type)}</p><p class="text-xs text-gray-500 mt-1">${r.note || 'Not yok.'}</p><p class="text-[10px] font-black text-[#B71C1C] mt-2 uppercase" id="count-${pt.anchorId}">${pt.reporterCount} kişi bildirdi · Yarıçap ~${Math.round(calcHeatRadius(pt.reporterCount))} m</p>${already ? '<p class="heat-popup-supported">✓ Bildirdiniz</p>' : supportButtonHtml(pt.anchorId, false)}${moderatorDeleteButtonHtml(pt.anchorId, false)}</div></div>`;
-            });
+            const sorted = [...points].sort((a, b) => b.reporterCount - a.reporterCount);
+            const cards = await Promise.all(sorted.map(async (pt, i) => {
+                const street = await reverseStreetName(pt.lat, pt.lng);
+                return problemPointCardHtml(pt, i + 1, street);
+            }));
+            list.innerHTML = cards.join('');
         }
 
         function renderHeatPoint(point) {
@@ -643,10 +787,10 @@
             currentMapLayers.push({ circle, pin, point });
         }
 
-        function refreshHeatLayers(points) {
+        async function refreshHeatLayers(points) {
             clearMapLayers();
             points.forEach(renderHeatPoint);
-            renderReportsList(points);
+            await renderReportsList(points);
         }
 
         function filterPointsByCategory(reports, category) {
@@ -708,7 +852,7 @@
             document.getElementById('map-location-label').innerText = `${locLabel(il, 'İl')} / ${locLabel(ilce, 'İlçe')} / ${locLabel(cachedMapUser.neighborhood, 'Mahalle')} · ${projectLabel(selectedMapCategory)}`;
         }
 
-        function applyMapCategoryFilter() {
+        async function applyMapCategoryFilter() {
             updateCategoryTabs();
             const noReportsEl = document.getElementById('no-reports-msg');
             if (!cachedMapReports.length) {
@@ -727,7 +871,7 @@
                 return;
             }
             noReportsEl.classList.add('hidden');
-            refreshHeatLayers(points);
+            await refreshHeatLayers(points);
         }
 
         window.selectMapCategory = (type) => {
