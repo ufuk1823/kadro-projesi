@@ -1,21 +1,4 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "izmir_muhtarliklar",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "lookupKey", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "izmir_muhtarliklar",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "ilceNorm", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" }
-      ]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": []
 }

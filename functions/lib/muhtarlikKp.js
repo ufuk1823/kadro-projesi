@@ -17,7 +17,6 @@ async function findMuhtarlikForUser(db, ilce, neighborhood) {
     const lookupKey = normMahalleKey(ilce, neighborhood);
     const exact = await db.collection(MUHTAR_COL)
         .where('lookupKey', '==', lookupKey)
-        .where('active', '==', true)
         .limit(1)
         .get();
     if (!exact.empty) return exact.docs[0];
@@ -26,7 +25,6 @@ async function findMuhtarlikForUser(db, ilce, neighborhood) {
     const mahalleNorm = normLoc(neighborhood);
     const byIlce = await db.collection(MUHTAR_COL)
         .where('ilceNorm', '==', ilceNorm)
-        .where('active', '==', true)
         .get();
     if (byIlce.empty) return null;
 

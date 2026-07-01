@@ -551,7 +551,7 @@
             neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
             KP_AWARDED: (n, total) => `Tebrikler! +${n} Kadro Puanı kazandınız. Toplam: ${total} Kp`,
             KP_NOT_IZMIR: 'Bu görev şu an yalnızca İzmir\'de kayıtlı mahalleler için geçerlidir.',
-            KP_SYNC_OK: (data) => `Muhtarlık verisi güncellendi: ${data.upserted} kayıt, ${data.deactivated} pasifleştirildi.`,
+            KP_SYNC_OK: (data) => `Muhtarlık verisi güncellendi: ${data.checked} kontrol, ${data.added} eklendi, ${data.updated} güncellendi, ${data.deleted} silindi, ${data.unchanged} değişmedi.`,
         };
         const showUserMessage = (message) => showNoticeModal(message);
         const showUserError = (error) => showNoticeModal(error?.message || String(error));
