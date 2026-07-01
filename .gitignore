@@ -1,0 +1,18 @@
+# Bağımlılıklar — npm install ile yeniden oluşur, repoya girmez
+node_modules/
+functions/node_modules/
+
+# Firebase / gizli anahtarlar
+*-firebase-adminsdk-*.json
+serviceAccount*.json
+.env
+.env.*
+
+# Firebase debug
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+
+# OS / editör
+.DS_Store
+Thumbs.db
