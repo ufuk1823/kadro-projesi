@@ -406,7 +406,7 @@
             <div class="muhtarlik-kp-points">Kadro Puanınız: <span id="muhtarlik-kp-balance">0</span> Kp</div>
             <div class="muhtarlik-kp-status" id="muhtarlik-kp-status">Durum yükleniyor…</div>
             <button type="button" id="muhtarlik-kp-claim-btn" class="bg-[#B71C1C] text-white w-full py-5 rounded-2xl font-black text-sm uppercase tracking-wide shadow-xl disabled:opacity-40 disabled:cursor-not-allowed" onclick="claimMuhtarlikKpCheckIn()" disabled>Konumumu Bildir</button>
-            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-4">Muhtarlık adresleri belediye açık verisinden sunucuda senkronize edilir.</p>
+            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-4">Muhtarlık adresleri belediye açık verisinden moderatör tarafından sunucuda güncellenir.</p>
         </div>
     </div>
 
@@ -481,7 +481,7 @@
         </div>
         <div id="moderation-empty" class="hidden bg-white p-10 rounded-2xl text-center border-2 border-dashed border-gray-200 text-gray-400 font-bold italic">Henüz yedek bildirim yok.</div>
         <div id="moderation-backup-list" class="space-y-4"></div>
-        <button type="button" id="moderator-sync-muhtarlik-btn" class="hidden mt-8 w-full bg-gray-900 text-white py-4 rounded-xl font-black uppercase text-xs tracking-widest" onclick="moderatorSyncMuhtarliklar()">Muhtarlık Verisini Senkronize Et</button>
+        <button type="button" id="moderator-sync-muhtarlik-btn" class="hidden mt-8 w-full bg-gray-900 text-white py-4 rounded-xl font-black uppercase text-xs tracking-widest" onclick="moderatorSyncMuhtarliklar()">Muhtarlık Verisini Güncelle</button>
     </div>
 
     <!-- 6. GÜNDEMLER -->
@@ -551,7 +551,7 @@
             neighborhoodUpdated: (loc) => `Kayıtlı mahalleniz güncellendi: ${loc}`,
             KP_AWARDED: (n, total) => `Tebrikler! +${n} Kadro Puanı kazandınız. Toplam: ${total} Kp`,
             KP_NOT_IZMIR: 'Bu görev şu an yalnızca İzmir\'de kayıtlı mahalleler için geçerlidir.',
-            KP_SYNC_OK: (data) => `Muhtarlık senkronu tamam: ${data.upserted} kayıt, ${data.deactivated} pasifleştirildi.`,
+            KP_SYNC_OK: (data) => `Muhtarlık verisi güncellendi: ${data.upserted} kayıt, ${data.deactivated} pasifleştirildi.`,
         };
         const showUserMessage = (message) => showNoticeModal(message);
         const showUserError = (error) => showNoticeModal(error?.message || String(error));

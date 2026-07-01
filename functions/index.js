@@ -1,5 +1,4 @@
 const admin = require('firebase-admin');
-const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { syncMuhtarliklarToFirestore } = require('./lib/muhtarlikSync');
 const { claimMuhtarlikKp, isModeratorEmail } = require('./lib/muhtarlikKp');
@@ -17,16 +16,7 @@ function toHttpsError(error) {
     return new HttpsError('internal', error.message || 'Sunucu hatası');
 }
 
-exports.syncMuhtarliklarDaily = onSchedule({
-    schedule: 'every day 04:00',
-    timeZone: 'Europe/Istanbul',
-    timeoutSeconds: 540,
-    memory: '512MiB',
-}, async () => {
-    const result = await syncMuhtarliklarToFirestore(db, admin);
-    console.log('Muhtarlık sync tamamlandı', result);
-});
-
+// Muhtarlık verisi yalnızca moderatör panelinden manuel güncellenir (syncMuhtarliklarManual).
 exports.syncMuhtarliklarManual = onCall({
     timeoutSeconds: 540,
     memory: '512MiB',
