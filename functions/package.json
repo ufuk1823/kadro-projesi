@@ -1,0 +1,15 @@
+{
+  "name": "kadro-org-functions",
+  "description": "Kadro.org sunucu tarafı — muhtarlık senkronu ve Kp doğrulama",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "scripts": {
+    "sync": "node ../scripts/sync-muhtarliklar.js",
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions,firestore:rules"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^5.1.1"
+  }
+}
